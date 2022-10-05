@@ -1,5 +1,5 @@
 {
-  "name": "@buttress/db-service",
+  "name": "@buttress/crag",
   "description": "Webcomponent buttress-db-service following open-wc recommendations",
   "license": "MIT",
   "author": "buttress-db-service",
@@ -14,6 +14,7 @@
     "analyze": "cem analyze --litelement",
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
     "build": "tsc && npm run analyze -- --exclude dist",
+    "watch": "tsc --watch --preserveWatchOutput",
     "prepublish": "tsc && npm run analyze -- --exclude dist",
     "lint": "eslint --ext .ts,.html . --ignore-path .gitignore && prettier \"**/*.ts\" --check --ignore-path .gitignore",
     "format": "eslint --ext .ts,.html . --fix --ignore-path .gitignore && prettier \"**/*.ts\" --write --ignore-path .gitignore",
@@ -23,9 +24,11 @@
     "storybook:build": "tsc && npm run analyze -- --exclude dist && build-storybook"
   },
   "dependencies": {
+    "@lighten/ltn-element": "0.0.0",
+    "@web/dev-server-esbuild": "^0.3.2",
+    "bson": "~4.7.0",
     "lit": "^2.0.2",
-    "@lighten/ltn-element": "1.0.0",
-    "bson": "~4.7.0"
+    "socket.io-client": "^4.5.2"
   },
   "devDependencies": {
     "@custom-elements-manifest/analyzer": "^0.4.17",

@@ -4,8 +4,9 @@ import { LtnService } from '@lighten/ltn-element';
 
 import ButtressDataService from './ButtressDataService.js';
 import ButtressStore from './ButtressStore.js';
+import ButtressRealtime from './ButtressRealtime.js';
 
-import {ButtressSchema} from './ButtressSchema.js';
+import ButtressSchema from './ButtressSchema.js';
 
 import {Settings} from './helpers.js';
 
@@ -19,9 +20,13 @@ export class ButtressDbService extends LtnService {
   // @property({ type: String, attribute: false }) endpoint = "hello";
   // private _endpoint: String = "hello";asd
 
+  private _store: ButtressStore;
+
+  private _realtime: ButtressRealtime;
+
   private _settings: Settings = {
     endpoint: 'https://local.buttressjs.com',
-    token: '0wt5A5Mx5sVIIN1980J0YgBYwYsIhBI08t44',
+    token: 'YwwUxkdE1AkkdE8tlAkJd9UpRwJAZp9c5sMB',
     apiPath: 'lit'
   };
 
@@ -34,6 +39,13 @@ export class ButtressDbService extends LtnService {
   private _connected: boolean = false;
 
   private _awaitConnectionPool: Array<Function> = [];
+
+  constructor() {
+    super();
+
+    this._store = new ButtressStore();
+    this._realtime = new ButtressRealtime(this._store, this._settings);
+  }
 
   async connectedCallback() {
     super.connectedCallback();
@@ -49,6 +61,7 @@ export class ButtressDbService extends LtnService {
     // this._debug(`connectedCallback`, this.__settings);
 
     await this._connect();
+    await this._realtime.connect();
   }
 
   disconnectedCallback() {
@@ -67,7 +80,7 @@ export class ButtressDbService extends LtnService {
 
     // Test the connection to buttress
 
-
+    // Kick off realtime sync
 
     await this._fetchAppSchema();
     // TODO: Handle errors
@@ -123,7 +136,7 @@ export class ButtressDbService extends LtnService {
       if (dataServices.includes(name)) {
         this._dataServices[name].updateSchema(this._schema[name]);
       } else {
-        this._dataServices[name] = new ButtressDataService(name, this._settings, this._schema[name]);
+        this._dataServices[name] = new ButtressDataService(name, this._settings, this._store, this._schema[name]);
       }
     });
 
@@ -142,31 +155,31 @@ export class ButtressDbService extends LtnService {
 
   // eslint-disable-next-line class-methods-use-this
   get(path: string): any {
-    return ButtressStore.get(path);
+    return this._store.get(path);
   }
 
   // eslint-disable-next-line class-methods-use-this
   set(path: string, value: any): string|undefined {
-    return ButtressStore.set(path, value);
+    return this._store.set(path, value);
   }
 
   // eslint-disable-next-line class-methods-use-this
   push(path: string, ...items: any[]): number {
-    return ButtressStore.push(path, ...items);
+    return this._store.push(path, ...items);
   }
 
   // eslint-disable-next-line class-methods-use-this
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
     if (arguments.length < 3) {
-      return ButtressStore.splice(path, start);
+      return this._store.splice(path, start);
     }
 
-    return ButtressStore.splice(path, start, deleteCount, ...items);
+    return this._store.splice(path, start, deleteCount, ...items);
   }
 
   // eslint-disable-next-line class-methods-use-this
   subscribe(path: string, cb: Function): boolean {
-    ButtressStore.subscribe(path, cb);
+    this._store.subscribe(path, cb);
     return true;
   }
 

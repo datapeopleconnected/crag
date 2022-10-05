@@ -9,11 +9,12 @@ export default /** @type {import('@web/dev-server').DevServerConfig} */ ({
   watch: !hmr,
   /** Resolve bare module imports */
   nodeResolve: {
+    browser: true,
     exportConditions: ['browser', 'development'],
   },
 
   /** Compile JS for older browsers. Requires @web/dev-server-esbuild plugin */
-  // esbuildTarget: 'auto'
+  // esbuildTarget: 'auto',
 
   /** Set appIndex to enable SPA routing */
   // appIndex: 'demo/index.html',

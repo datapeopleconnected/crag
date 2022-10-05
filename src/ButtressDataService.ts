@@ -1,17 +1,17 @@
 import {ObjectId} from 'bson';
 
-import {ButtressSchema} from './ButtressSchema.js';
+import ButtressSchema from './ButtressSchema.js';
 
 import ButtressStore from './ButtressStore.js';
 
 import {Settings} from './helpers.js';
 
-console.log(ObjectId);
-
 export default class ButtressDataService {
   name: string;
 
   readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
+
+  private _store: ButtressStore;
 
   private _schema: ButtressSchema | undefined;
 
@@ -29,13 +29,15 @@ export default class ButtressDataService {
 
   bundlingChunk: number = 100;
 
-  constructor(name: string, settings: Settings, schema?: ButtressSchema) {
+  constructor(name: string, settings: Settings, store: ButtressStore, schema?: ButtressSchema) {
     this.name = name;
     this._settings = settings;
 
     if (schema) this.updateSchema(schema);
 
-    ButtressStore.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
+    this._store = store;
+
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -63,7 +65,7 @@ export default class ButtressDataService {
               return;
             }
 
-            // if (!o.id) o.id = new ObjectID();
+            if (!o.id) o.id = new ObjectId().toString();
 
             this._generateAddRequest(o);
           }
@@ -81,7 +83,7 @@ export default class ButtressDataService {
         });
       } else {
 
-        const entity = ButtressStore.get(path.slice(0,2));
+        const entity = this._store.get(path.slice(0,2));
         if (entity.__readOnlyChange__) {
           console.log(`Ignoring readonly change: ${cr.path}`);
           delete entity.__readOnlyChange__;
@@ -144,7 +146,7 @@ export default class ButtressDataService {
       }
 
       const pathToEntity = path.splice(0, 2).join('.');
-      const item = ButtressStore.get(pathToEntity);
+      const item = this._store.get(pathToEntity);
 
       this._generateUpdateRequest(item.id, path.join('.'), cr.value);
     }
@@ -164,7 +166,7 @@ export default class ButtressDataService {
   }
 
   _filterLocalData(buttressQuery: any, opts?: {sortPath?: string}): Array<any> {
-    let data = ButtressStore.get(this.name);
+    let data = this._store.get(this.name);
 
     try {
       data = this._processQueryPart(buttressQuery, data);
@@ -207,7 +209,7 @@ export default class ButtressDataService {
 
   // eslint-disable-next-line class-methods-use-this
   _parsePath(obj: any, path: string) {
-    const value = ButtressStore.get(path, obj);
+    const value = this._store.get(path, obj);
     return Array.isArray(value) ? value : [value];
   }
 
@@ -292,7 +294,7 @@ export default class ButtressDataService {
     if (response.ok) {
       body = await response.json();
       // this.set(this.name, body);
-      ButtressStore.set(this.name, body);
+      this._store.set(this.name, body);
       this._queryMap.push(`${hash}`);
     } else {
       throw new Error(`Buttress Error: ${response.status}: ${response.statusText}`);
@@ -492,8 +494,8 @@ export default class ButtressDataService {
   // set(path: string, value: any): string|undefined {
   //   // const parts = path.toString().split('.');
   //   // parts.unshift(this.name);
-  //   // return ButtressStore.set(parts.join('.'), value);
-  //   return ButtressStore.set(path, value);
+  //   // return this._store.set(parts.join('.'), value);
+  //   return this._store.set(path, value);
   // }
 
   // TODO: process a change

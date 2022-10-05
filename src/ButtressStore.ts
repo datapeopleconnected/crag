@@ -1,4 +1,4 @@
-import {ButtressSchema} from './ButtressSchema.js';
+import ButtressSchema from './ButtressSchema.js';
 
 interface PathSig {
   name: string,
@@ -15,7 +15,7 @@ interface MapAny {
 
 let dedupeId = 0;
 
-export class ButtressStore {
+export default class ButtressStore {
   private _data: {[key: string]: ButtressSchema};
 
   private _dataInvalid: boolean = false;
@@ -298,5 +298,3 @@ export class ButtressStore {
 
   }
 }
-
-export default new ButtressStore();
