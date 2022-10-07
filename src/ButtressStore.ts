@@ -9,6 +9,10 @@ interface PathSig {
   wildcard: boolean,
 }
 
+interface ChangeOpts {
+  readonly?: boolean
+}
+
 interface MapAny {
   [key: string]: any
 }
@@ -28,7 +32,6 @@ export default class ButtressStore {
 
   constructor() {
     this._data = {};
-
   }
 
   get(path: string, root?: any): any {
@@ -45,7 +48,7 @@ export default class ButtressStore {
     return prop;
   }
 
-  set(path: string, value: any): string|undefined {
+  set(path: string, value: any, opts?: ChangeOpts): string|undefined {
     const change = this.notifyPath(path, value);
     const setPath = this.setDataProperty(path, value);
     if (change) this._invalidateData();
@@ -53,11 +56,15 @@ export default class ButtressStore {
   }
 
   push(path: string, ...items: any[]): number {
+    return this.pushExt(path, undefined, ...items);
+  }
+
+  pushExt(path: string, opts?: ChangeOpts, ...items: any[]): number {
     const array = this.get(path);
     const len = array.length;
     const ret = array.push(...items);
 
-    if (items.length) {
+    if (!opts?.readonly && items.length) {
       this.notifySplices(array, path, [{
         index: len,
         addedCount: items.length,
@@ -71,6 +78,10 @@ export default class ButtressStore {
   }
 
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
+    return this.spliceExt(path, start, deleteCount, undefined, ...items);
+  }
+
+  spliceExt(path: string, start: number, deleteCount?: number, opts?: ChangeOpts, ...items: any[]): any[] {
     const array = this.get(path);
 
     let beginning = start;
@@ -83,7 +94,7 @@ export default class ButtressStore {
 
     const ret = (arguments.length === 2) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
 
-    if (items.length || ret.length) {
+    if (!opts?.readonly && (items.length || ret.length)) {
       this.notifySplices(array, path, [{
         index: beginning,
         addedCount: items.length,
@@ -124,7 +135,7 @@ export default class ButtressStore {
     return parts.join('.');
   }
 
-  notifyPath(path: string, value?: any): boolean {
+  notifyPath(path: string, value?: any, opts?: ChangeOpts): boolean {
     let val = value;
     if (arguments.length === 1) {
       val = this.get(path);
@@ -143,7 +154,10 @@ export default class ButtressStore {
         this._dataOld[path] = old;
       }
 
-      this._dataPending[path] = val;
+      this._dataPending[path] = {
+        value,
+        opts
+      };
     }
 
     return changed;
@@ -207,16 +221,23 @@ export default class ButtressStore {
         if (wildcard) {
           const matches = path.indexOf(`${name}.`) === 0;
           const p = matches ? path : name;
-          const pathValue = (this.get(p) === undefined) ? props[p] : this.get(p);
+          const pathValue = (this.get(p) === undefined) ? props[p].val : this.get(p);
           value = {
             path: matches ? path : name,
             value: pathValue,
-            base: matches ? this.get(name) : pathValue
+            base: matches ? this.get(name) : pathValue,
+            opts: props[p]?.opts
           };
         } else if (structured) {
-          value = (this.get(name) === undefined) ? props[name] : this.get(name);
+          value = {
+            value: (this.get(name) === undefined) ? props[name].val : this.get(name),
+            opts: props[name]?.opts
+          };
         } else {
-          value = this.get(name);
+          value = {
+            value: this.get(name),
+            opts: props[name]?.opts
+          };
         }
       }
 

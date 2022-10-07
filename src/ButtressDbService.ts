@@ -26,8 +26,9 @@ export class ButtressDbService extends LtnService {
 
   private _settings: Settings = {
     endpoint: 'https://local.buttressjs.com',
-    token: 'YwwUxkdE1AkkdE8tlAkJd9UpRwJAZp9c5sMB',
-    apiPath: 'lit'
+    token: '0wt5A5Mx5sVIIN1980J0YgBYwYsIhBI08t44',
+    apiPath: 'lit',
+    userId: '6335681586c39a0e9a8ec6b8',
   };
 
   private _schema: {[key: string]: ButtressSchema} | null = null;
@@ -195,6 +196,9 @@ export class ButtressDbService extends LtnService {
     return this._dataServices[ds]
   }
 
+  setUserId(userId: string) {
+    this._settings.userId = userId;
+  }
 
   render() {
     return html``;
