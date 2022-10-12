@@ -1,5 +1,5 @@
 import { html, css } from 'lit';
-import { LtnService } from '@lighten/ltn-element';
+import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
 import ButtressDataService from './ButtressDataService.js';
@@ -8,7 +8,7 @@ import ButtressRealtime from './ButtressRealtime.js';
 
 import ButtressSchema from './ButtressSchema.js';
 
-import {Settings} from './helpers.js';
+import { Settings } from './helpers.js';
 
 export class ButtressDbService extends LtnService {
   static styles = css`
@@ -26,7 +26,7 @@ export class ButtressDbService extends LtnService {
 
   private _settings: Settings = {
     endpoint: 'https://local.buttressjs.com',
-    token: '0wt5A5Mx5sVIIN1980J0YgBYwYsIhBI08t44',
+    token: 'YwwUxkdE1AkkdE8tlAkJd9UpRwJAZp9c5sMB',
     apiPath: 'lit',
     userId: '6335681586c39a0e9a8ec6b8',
   };
@@ -138,6 +138,9 @@ export class ButtressDbService extends LtnService {
         this._dataServices[name].updateSchema(this._schema[name]);
       } else {
         this._dataServices[name] = new ButtressDataService(name, this._settings, this._store, this._schema[name]);
+        if (this._settings.logLevel) {
+          this._dataServices[name].setLogLevel(this._settings.logLevel);
+        }
       }
     });
 
@@ -149,9 +152,23 @@ export class ButtressDbService extends LtnService {
 
     await new Promise((r) => this._awaitConnectionPool.push(r));
 
-    console.log('awaited');
+    this._debug('awaited');
 
     return true;
+  }
+
+  protected _setLogLevel(level: LtnLogLevel) {
+    super._setLogLevel(level);
+
+    this._settings.logLevel = level;
+
+    this._realtime.setLogLevel(level);
+    this._store.setLogLevel(level);
+
+    const dataServices: string[] = Object.keys(this._dataServices || []);
+    dataServices.forEach((key) => {
+      this._dataServices[key].setLogLevel(level);
+    });
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -188,7 +205,7 @@ export class ButtressDbService extends LtnService {
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
 
-    return await ds.query(buttressQuery);
+    return ds.query(buttressQuery);
   }
 
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {

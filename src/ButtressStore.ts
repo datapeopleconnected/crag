@@ -1,3 +1,4 @@
+import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
 import ButtressSchema from './ButtressSchema.js';
 
 interface PathSig {
@@ -20,6 +21,9 @@ interface MapAny {
 let dedupeId = 0;
 
 export default class ButtressStore {
+
+  private _logger: LtnLogger;
+
   private _data: {[key: string]: ButtressSchema};
 
   private _dataInvalid: boolean = false;
@@ -32,6 +36,12 @@ export default class ButtressStore {
 
   constructor() {
     this._data = {};
+
+    this._logger = new LtnLogger('buttress-store');
+  }
+
+  setLogLevel(level: LtnLogLevel) {
+    this._logger.level = level;
   }
 
   get(path: string, root?: any): any {
@@ -49,7 +59,7 @@ export default class ButtressStore {
   }
 
   set(path: string, value: any, opts?: ChangeOpts): string|undefined {
-    const change = this.notifyPath(path, value);
+    const change = this.notifyPath(path, value, opts);
     const setPath = this.setDataProperty(path, value);
     if (change) this._invalidateData();
     return setPath;
@@ -64,13 +74,15 @@ export default class ButtressStore {
     const len = array.length;
     const ret = array.push(...items);
 
-    if (!opts?.readonly && items.length) {
+    // if (!opts?.readonly && items.length) {
+    if (items.length) {
       this.notifySplices(array, path, [{
         index: len,
         addedCount: items.length,
         removed: [],
         object: array,
-        type: 'splice'
+        type: 'splice',
+        opts
       }]);
     }
 
@@ -94,13 +106,14 @@ export default class ButtressStore {
 
     const ret = (arguments.length === 2) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
 
-    if (!opts?.readonly && (items.length || ret.length)) {
+    if (items.length || ret.length) {
       this.notifySplices(array, path, [{
         index: beginning,
         addedCount: items.length,
         removed: ret,
         object: array,
-        type: 'splice'
+        type: 'splice',
+        opts
       }]);
     }
 
@@ -120,7 +133,7 @@ export default class ButtressStore {
     const last = parts[parts.length-1];
     if (parts.length > 1) {
       // Loop over path parts[0..n-2] and dereference
-      for (let i=0; i < parts.length - 1; i += 1) {
+      for (let i = 0; i < parts.length - 1; i += 1) {
         const part = parts[i];
         prop = prop[part];
         if (!prop) return undefined;
@@ -164,6 +177,7 @@ export default class ButtressStore {
   }
 
   _invalidateData() {
+    this._logger.debug(`_invalidateData _dataInvalid:${this._dataInvalid}`);
     if (!this._dataInvalid) {
       this._dataInvalid = true;
       queueMicrotask(() => {
@@ -179,6 +193,7 @@ export default class ButtressStore {
   _flushProperties() {
     const changedProps = this._dataPending;
     const old = this._dataOld;
+    this._logger.debug(`_flushProperties _dataPending:${this._dataPending} _dataOld:${this._dataOld}`);
     if (changedProps !== null) {
       this._dataPending = null;
       this._dataOld = null;
@@ -189,6 +204,8 @@ export default class ButtressStore {
   // eslint-disable-next-line class-methods-use-this
   _propertiesChanged(changedProps: MapAny, oldProps: MapAny | null) {
     let ran = false;
+
+    this._logger.debug(`_propertiesChanged changedProps:${changedProps} oldProps:${oldProps}`);
 
     // eslint-disable-next-line no-multi-assign
     const id = dedupeId += 1;
@@ -214,6 +231,7 @@ export default class ButtressStore {
 
   _marshalArgs(args: any[], path: string, props: MapAny) {
     const values = [];
+
     for (let i = 0, l = args.length; i < l; i += 1) {
       const {name, structured, wildcard, argVal, literal} = args[i];
       let value = argVal;
@@ -221,7 +239,7 @@ export default class ButtressStore {
         if (wildcard) {
           const matches = path.indexOf(`${name}.`) === 0;
           const p = matches ? path : name;
-          const pathValue = (this.get(p) === undefined) ? props[p].val : this.get(p);
+          const pathValue = (this.get(p) === undefined) ? props[p].value : this.get(p);
           value = {
             path: matches ? path : name,
             value: pathValue,
@@ -230,7 +248,7 @@ export default class ButtressStore {
           };
         } else if (structured) {
           value = {
-            value: (this.get(name) === undefined) ? props[name].val : this.get(name),
+            value: (this.get(name) === undefined) ? props[name].value : this.get(name),
             opts: props[name]?.opts
           };
         } else {
@@ -255,6 +273,7 @@ export default class ButtressStore {
 
   // eslint-disable-next-line class-methods-use-this
   subscribe(pathsStr: string, fn: Function) {
+    this._logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
       .map((path) => this.parsePath(path.trim()));
 

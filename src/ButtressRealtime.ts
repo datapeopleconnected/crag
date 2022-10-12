@@ -1,5 +1,7 @@
 import {io} from 'socket.io-client';
-// import Sugar from 'sugar';
+import Sugar from 'sugar';
+
+import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
 
 import ButtressStore from "./ButtressStore.js";
 
@@ -11,6 +13,8 @@ interface PathParts {
 };
 
 export default class ButtressDataRealtime {
+
+  private _logger: LtnLogger;
 
   private _store: ButtressStore;
 
@@ -34,6 +38,8 @@ export default class ButtressDataRealtime {
   constructor(store: ButtressStore, settings: Settings) {
     this._store = store;
     this._settings = settings;
+
+    this._logger = new LtnLogger('buttress-data-realtime');
   }
 
   connect() {
@@ -46,6 +52,8 @@ export default class ButtressDataRealtime {
 
     const uri = (this._settings?.apiPath) ? `${this._settings.endpoint}/${this._settings.apiPath}` : this._settings.endpoint;
 
+    this._logger.debug(`Opening connection to ${uri}`);
+
     try {
       this._socket = io(uri, {
         query: {
@@ -53,67 +61,75 @@ export default class ButtressDataRealtime {
         }
       });
       this._socket.on('connect',() => {
+        this._logger.debug(`Connected`);
         this._connected = true;
         this._configureRxEvents();
       });
       this._socket.on('disconnect',() => {
+        this._logger.debug(`Disconnected`);
         this._connected = false;
       });
     } catch (err) {
       this._connected = false;
-      console.error(err);
+      this._logger.error(err);
     }
+  }
+
+  setLogLevel(level: LtnLogLevel) {
+    this._logger.level = level;
   }
 
   private _configureRxEvents() {
     this._rxEvents.forEach((eventName) => {
-      this._socket.on(eventName, (data: any) => this._handleRxEvent(eventName, data));
+      this._socket.on(eventName, (payload: any) => this._handleRxEvent(eventName, payload));
     });
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private _handleRxEvent(type:string, data: any) {
+  private _handleRxEvent(type:string, payload: any) {
+    this._logger.debug(`RX Event type:${type} `, payload);
     if (type === 'db-disconnect-room' || type === 'db-connect-room') {
       // Do stuff
     } else if (type === 'clear-local-db') {
-      this._clearUserLocaldata(data);
+      // this._clearUserLocaldata(data);
       // Do stuff
     } else if (type === 'db-activity') {
       // Do stuff
-      this._dbActivity(data);
+      this._dbActivity(payload);
     } else {
       // Log out somthing
     }
   }
 
-  private _dbActivity(data: any) {
-    const lastSequence = this._lastSequence[data.room];
+  private _dbActivity(payload: any) {
+    const lastSequence = this._lastSequence[payload.room];
 
     if (lastSequence) {
-      if (lastSequence === data.sequence) {
+      if (lastSequence === payload.sequence) {
         this._synced = false;
       }
-      if (lastSequence + 1 !== data.sequence) {
+      if (lastSequence + 1 !== payload.sequence) {
         this._synced = false;
       }
     }
 
-    if (this._settings?.userId !== data.user || data.isSameApp === false) {
-      this._parsePayload(data);
+    if (this._settings?.userId !== payload.user || payload.isSameApp === false) {
+      this._parsePayload(payload.data);
     }
 
-    this._lastSequence[data.room] = data.sequence;
+    this._lastSequence[payload.room] = payload.sequence;
   }
 
-  private _clearUserLocaldata(data: any) {
+  private _clearUserLocaldata(payload: any) {
   }
 
   // eslint-disable-next-line class-methods-use-this
   private _parsePayload(data: any) {
     const {response} = data;
-    if (response && typeof response === 'object') {
-      response.__readonly__ = true;
-    }
+    // if (response && typeof response === 'object') {
+    //   response.__readonly__ = true;
+    // }
+
     const pathSpec = data.pathSpec.split('/').map((ps: string) => Sugar.String.camelize(ps, false)).filter((s: string) => s && s !== '');
     const path = data.path.split('/').map((p: string) => Sugar.String.camelize(p, false)).filter((s: string) => s && s !== '');
     const paramsRegex = /:(([a-z]|[A-Z]|[0-9]|[-])+)(?:\(.*?\))?$/;
@@ -128,8 +144,8 @@ export default class ButtressDataRealtime {
       }
     }
 
-    if (path.length > 0 && !this._store.get(`db.${path[0]}.data`)) {
-      // if (this.get('logging')) console.log('silly', `__parsePayload: No data service for ${path[0]}`);
+    if (path.length > 0 && !this._store.get(`${path[0]}`)) {
+      this._logger.debug(`__parsePayload: No data service for ${path[0]}`);
       return; // We don't have a data service for this data
     }
 
@@ -137,6 +153,8 @@ export default class ButtressDataRealtime {
       collectionName: path[0],
       id: path[1],
     };
+
+    this._logger.debug(`__parsePayload verb:${data.verb}`, pathParts);
 
     if (data.verb === 'post') {
       if (pathStr.includes('bulk/update')) {
@@ -152,25 +170,23 @@ export default class ButtressDataRealtime {
       const clearData = data.isBulkDelete;
       this._handleDelete(pathParts, response, false, clearData);
       if (path.length === 1) {
-        const collection = this._store.get(`db.${path[0]}.data`);
-        for (let x = 0; x < collection.length; x += 1) {
-          collection[x].__readonly__ = true;
-        }
-        this._store.splice(`db.${path[0]}.data`, 0, data.length);
+        this._store.spliceExt(path[0], 0, data.length, {
+          readonly: true
+        });
       } else if (path.length === 2 && params.id) {
         const collection = this._store.get(`db.${path[0]}.data`);
         const itemIndex = collection.findIndex((d: any) => d.id === params.id);
         if (itemIndex !== -1) {
-          const item = data[itemIndex];
-          item.__readonly__ = true;
-          this._store.splice(`db.${path[0]}.data`, itemIndex, 1);
+          this._store.spliceExt(path[0], itemIndex, 1, {
+            readonly: true
+          });
         }
       }
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private _handlePut(pathParts: PathParts, response: any) {
+    this._logger.debug(`_handlePut: start`);
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
 
     for (let x = 0; x < responses.length; x += 1) {
@@ -185,43 +201,74 @@ export default class ButtressDataRealtime {
   }
 
   private _handleDelete(pathParts: PathParts, response:any, isBulk: boolean = false, clear: boolean = false) {
-    
+    this._logger.debug(`_handleDelete: start`);
+    const responses: Array<any> = (Array.isArray(response)) ? response : [response];
+  
+    const data = this._store.get(pathParts.collectionName);
+    if (clear || (!isBulk && !pathParts.id)) { // DeleteAll
+      this._store.spliceExt(pathParts.collectionName, 0, data.length, {
+        readonly: true
+      });
+    } else if (isBulk) {
+      // TODO: Need to get list of the ids that have been deleted from buttress
+      for (let x = 0; x < responses.length; x += 1) {
+        const itemIndex = data.findIndex((d: any) => d.id === responses[x]);
+        if (itemIndex !== -1) {
+          this._store.spliceExt(pathParts.collectionName, itemIndex, 1, {
+            readonly: true
+          });
+        }
+      };
+    } else if (pathParts.id) { // DeleteSingle
+      const itemIndex = data.findIndex((d: any) => d.id === pathParts.id);
+      if (itemIndex !== -1) {
+        this._store.spliceExt(pathParts.collectionName, itemIndex, 1, {
+          readonly: true
+        });
+      }
+    }
   }
   
   private _handlePost(pathParts: PathParts, response: any) {
-    
-  }
+    const responses: Array<any> = (Array.isArray(response)) ? response : [response];
+    this._logger.debug(`_handlePost: start`, responses);
 
-  // -
+    const data = this._store.get(pathParts.collectionName);
+    for (let x = 0; x < responses.length; x += 1) {
+      const entityIdx = data.findIndex((e: any) => e.id === responses[x].id);
+      if (entityIdx !== -1) return;
+
+      this._store.pushExt(pathParts.collectionName, {
+        readonly: true
+      }, response);
+    }
+  }
 
   private async _update(pathParts: PathParts, id: string, response:any) {
     const updatePath = this._getUpdatePath(pathParts.collectionName, id, response.path);
+    this._logger.debug(`_update`, updatePath);
     if (typeof(updatePath) === 'boolean') {
       await this._store.get(pathParts.collectionName, id);
       return;
     }
-  
-    // if (this.get('logging')) console.log('silly', `__handlePut`, updatePath);
-    // this.db[pathParts.collectionName].data[updatePath[3]].__readOnlyChange__ = true;
 
-    // TODO: Flag as readonly change
     if (response.type === 'scalar') {
-      // if (this.get('logging')) console.log('silly', 'updating', updatePath, response.value);
+      this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, response.value, {
         readonly: true
       });
     } else if (response.type === 'scalar-increment') {
-      // if (this.get('logging')) console.log('silly', 'updating', updatePath, response.value);
+      this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, this._store.get(updatePath) + response.value, {
         readonly: true
       });
     }  else if (response.type === 'vector-add') {
-      // if (this.get('logging')) console.log('silly', 'inserting', updatePath, response.value);
+      this._logger.debug('inserting', updatePath, response.value);
       this._store.pushExt(updatePath, {
         readonly: true,
       }, response.value);
     }  else if (response.type === 'vector-rm') {
-      // if (this.get('logging')) console.log('silly', 'removing', updatePath, response.value);
+      this._logger.debug('removing', updatePath, response.value);
       this._store.spliceExt(updatePath, response.value.index, response.value.numRemoved, {
         readonly: true
       });
@@ -229,7 +276,7 @@ export default class ButtressDataRealtime {
   }
 
   private _getUpdatePath(collectionName: string, id: string, path?: string): string | boolean {
-    const data = this._store.get(`db.${collectionName}.data`);
+    const data = this._store.get(collectionName);
     if (!data) return false;
 
     const entityIdx = data.findIndex((e: any) => e.id === id);
@@ -244,7 +291,7 @@ export default class ButtressDataRealtime {
       }
     }
 
-    return ['db', collectionName, 'data', entityIdx].concat(tail).join('.');
+    return [collectionName, entityIdx].concat(tail).join('.');
   }
 
 }

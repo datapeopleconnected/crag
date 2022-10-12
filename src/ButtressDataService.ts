@@ -1,3 +1,4 @@
+import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
 import {ObjectId} from 'bson';
 
 import ButtressSchema from './ButtressSchema.js';
@@ -8,6 +9,8 @@ import {Settings} from './helpers.js';
 
 export default class ButtressDataService {
   name: string;
+
+  private _logger: LtnLogger;
 
   readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
 
@@ -33,11 +36,17 @@ export default class ButtressDataService {
     this.name = name;
     this._settings = settings;
 
+    this._logger = new LtnLogger(`buttress-data-service-${name}`);
+
     if (schema) this.updateSchema(schema);
 
     this._store = store;
 
     this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
+  }
+
+  setLogLevel(level: LtnLogLevel) {
+    this._logger.level = level;
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -47,37 +56,35 @@ export default class ButtressDataService {
     }
 
     if (/__(\w+)__/.test(cr.path)) {
-      console.log(`Ignoring internal change: ${cr.path}`);
+      this._logger.debug(`Ignoring internal change: ${cr.path}`);
       return;
     }
 
-    console.log(cr);
+    if (cr.opts?.readonly) {
+      this._logger.debug(`Ignoring readonly change: ${cr.path}`);
+      return;
+    }
+
+    this._logger.debug(cr);
 
     const path = cr.path.split('.');
     if (/\.splices$/.test(cr.path) === true) {
       if (path.length < 3) {
         // Modification to base
         cr.value.indexSplices.forEach((i: any) => {
+          if (i.opts?.readonly) {
+            return;
+          }
+
           const o = i.object[i.index];
           if (i.addedCount > 0) {
-            if (o.__readonly__) {
-              delete o.__readonly__;
-              return;
-            }
-
             if (!o.id) o.id = new ObjectId().toString();
 
             this._generateAddRequest(o);
           }
 
           i.removed.forEach((r: any) => {
-            if (r.__readonly__) {
-              console.log(`Ignoring __readonly__ splice for ${r.id}`);
-              delete r.__readonly__;
-              return;
-            }
-
-            console.log(`this.__generateRmRequest(${r.id});`);
+            this._logger.debug(`this.__generateRmRequest(${r.id});`);
             this._generateRmRequest(r.id);
           });
         });
@@ -85,15 +92,15 @@ export default class ButtressDataService {
 
         const entity = this._store.get(path.slice(0,2));
         if (entity.__readOnlyChange__) {
-          console.log(`Ignoring readonly change: ${cr.path}`);
+          this._logger.debug(`Ignoring readonly change: ${cr.path}`);
           delete entity.__readOnlyChange__;
           return;
         }
 
-        console.log(entity);
+        this._logger.debug(entity);
 
-        console.log('Child array mutation', cr);
-        console.log('Key Splices: ', cr.value.indexSplices.length);
+        this._logger.debug('Child array mutation', cr);
+        this._logger.debug('Key Splices: ', cr.value.indexSplices.length);
 
         // if (cr.value.indexSplices.length > 0) {
         //   cr.value.indexSplices.forEach(i => {
@@ -101,32 +108,32 @@ export default class ButtressDataService {
         //     if (i.addedCount > 0) {
         //       path.splice(0,2);
         //       path.splice(-1,1);
-        //       // if (this.get('logging')) console.log('Update request', entity.id, path.join('.'), cr.value);
+        //       // this._logger.debug('Update request', entity.id, path.join('.'), cr.value);
         //       if (typeof o === 'object' && !o.id) {
         //         o.id = AppDb.Factory.getObjectId();
         //       }
-        //       console.log(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, ${o});`);
+        //       this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, ${o});`);
         //       // this.__generateUpdateRequest(entity.id, path.join('.'), o);
         //     } else if (i.removed.length > 0){
         //       if(i.removed.length > 1) {
-        //         if (this.get('logging')) console.log('Index splice removed.length > 1', i.removed);
+        //         this._logger.debug('Index splice removed.length > 1', i.removed);
         //       } else {
         //         path.splice(0, 2);
         //         path.splice(-1, 1);
         //         path.push(i.index);
         //         path.push('__remove__');
 
-        //         console.log(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
+        //         this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
         //         // this.__generateUpdateRequest(entity.id, path.join('.'), '');
         //       }
         //     }
         //   });
         // } else if (cr.value.keySplices) {
-        //   console.log('Key Splices: ', cr.value.keySplices.length);
+        //   this._logger.debug('Key Splices: ', cr.value.keySplices.length);
         //   cr.value.keySplices.forEach((k, idx) => {
         //     k.removed.forEach(() => {
         //       let itemIndex = cr.value.indexSplices[idx].index;
-        //       console.log(itemIndex);
+        //       this._logger.debug(itemIndex);
     
         //       path.splice(0, 2); // drop the prefix
         //       path.splice(-1, 1); // drop the .splices
@@ -419,7 +426,7 @@ export default class ButtressDataService {
     let request = (requestIdx !== -1 && this.bundling) ? this._requestQueue.splice(requestIdx, 1).shift() : this._requestQueue.shift();
 
     if (this.bundling && this.BUNDLED_REQUESTS_TYPES.includes(request.type)) {
-      console.log('bulk compatible request, trying to chunk:', request.type);
+      this._logger.debug('bulk compatible request, trying to chunk:', request.type);
       const requests = [
         request,
         ...this._requestQueue.filter((r) => r.type === request.type)
