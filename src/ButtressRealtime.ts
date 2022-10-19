@@ -167,21 +167,7 @@ export default class ButtressDataRealtime {
     } else if (data.verb === 'put') {
       this._handlePut(pathParts, response);
     } else if (data.verb === 'delete') {
-      const clearData = data.isBulkDelete;
-      this._handleDelete(pathParts, response, false, clearData);
-      if (path.length === 1) {
-        this._store.spliceExt(path[0], 0, data.length, {
-          readonly: true
-        });
-      } else if (path.length === 2 && params.id) {
-        const collection = this._store.get(`db.${path[0]}.data`);
-        const itemIndex = collection.findIndex((d: any) => d.id === params.id);
-        if (itemIndex !== -1) {
-          this._store.spliceExt(path[0], itemIndex, 1, {
-            readonly: true
-          });
-        }
-      }
+      this._handleDelete(pathParts, response, false, data.isBulkDelete);
     }
   }
 
@@ -227,6 +213,7 @@ export default class ButtressDataRealtime {
         });
       }
     }
+    this._logger.debug(`_handleDelete: end`);
   }
   
   private _handlePost(pathParts: PathParts, response: any) {
@@ -262,12 +249,12 @@ export default class ButtressDataRealtime {
       this._store.set(updatePath, this._store.get(updatePath) + response.value, {
         readonly: true
       });
-    }  else if (response.type === 'vector-add') {
+    } else if (response.type === 'vector-add') {
       this._logger.debug('inserting', updatePath, response.value);
       this._store.pushExt(updatePath, {
         readonly: true,
       }, response.value);
-    }  else if (response.type === 'vector-rm') {
+    } else if (response.type === 'vector-rm') {
       this._logger.debug('removing', updatePath, response.value);
       this._store.spliceExt(updatePath, response.value.index, response.value.numRemoved, {
         readonly: true

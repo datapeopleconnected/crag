@@ -11,7 +11,8 @@ interface PathSig {
 }
 
 interface ChangeOpts {
-  readonly?: boolean
+  readonly?: boolean,
+  silent?: boolean
 }
 
 interface MapAny {
@@ -59,7 +60,7 @@ export default class ButtressStore {
   }
 
   set(path: string, value: any, opts?: ChangeOpts): string|undefined {
-    const change = this.notifyPath(path, value, opts);
+    const change = opts?.silent || this.notifyPath(path, value, opts);
     const setPath = this.setDataProperty(path, value);
     if (change) this._invalidateData();
     return setPath;
@@ -180,13 +181,13 @@ export default class ButtressStore {
     this._logger.debug(`_invalidateData _dataInvalid:${this._dataInvalid}`);
     if (!this._dataInvalid) {
       this._dataInvalid = true;
-      queueMicrotask(() => {
+      // queueMicrotask(() => {
       // Bundle up changes
         if (this._dataInvalid) {
           this._dataInvalid = false;
           this._flushProperties();
         }
-      });
+      // });
     }
   }
 

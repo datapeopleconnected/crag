@@ -166,9 +166,7 @@ export class ButtressDbService extends LtnService {
     this._store.setLogLevel(level);
 
     const dataServices: string[] = Object.keys(this._dataServices || []);
-    dataServices.forEach((key) => {
-      this._dataServices[key].setLogLevel(level);
-    });
+    dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
   }
 
   // eslint-disable-next-line class-methods-use-this

@@ -301,7 +301,9 @@ export default class ButtressDataService {
     if (response.ok) {
       body = await response.json();
       // this.set(this.name, body);
-      this._store.set(this.name, body);
+      this._store.set(this.name, body, {
+        silent: true
+      });
       this._queryMap.push(`${hash}`);
     } else {
       throw new Error(`Buttress Error: ${response.status}: ${response.statusText}`);
