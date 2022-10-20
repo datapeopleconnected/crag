@@ -72,6 +72,12 @@ export default class ButtressStore {
 
   pushExt(path: string, opts?: ChangeOpts, ...items: any[]): number {
     const array = this.get(path);
+
+    if (array === undefined) {
+      // Check against schema if this path should be a array, if so
+      // create one.
+    }
+
     const len = array.length;
     const ret = array.push(...items);
 

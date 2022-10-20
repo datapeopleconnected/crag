@@ -1,9 +1,11 @@
 import { LtnLogLevel } from '@lighten/ltn-element';
 
 export interface Settings {
-  endpoint: string,
-  token: string,
-  apiPath: string,
-  userId: string | null,
-  logLevel?: LtnLogLevel
+  [index: string]: string | undefined | LtnLogLevel;
+
+  endpoint?: string;
+  token?: string;
+  apiPath?: string;
+  userId?: string;
+  logLevel?: LtnLogLevel;
 };

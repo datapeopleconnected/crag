@@ -1,4 +1,5 @@
 import { html, css } from 'lit';
+import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
@@ -9,6 +10,7 @@ import ButtressRealtime from './ButtressRealtime.js';
 import ButtressSchema from './ButtressSchema.js';
 
 import { Settings } from './helpers.js';
+import { stringFixture } from '@open-wc/testing-helpers';
 
 export class ButtressDbService extends LtnService {
   static styles = css`
@@ -20,16 +22,23 @@ export class ButtressDbService extends LtnService {
   // @property({ type: String, attribute: false }) endpoint = "hello";
   // private _endpoint: String = "hello";asd
 
+  @property({type: String})
+  endpoint?: string;
+
+  @property({type: String})
+  token?: string;
+
+  @property({type: String, attribute: 'api-path'})
+  apiPath?: string;
+
+  @property({type: String})
+  userId?: string;
+
   private _store: ButtressStore;
 
   private _realtime: ButtressRealtime;
 
-  private _settings: Settings = {
-    endpoint: 'https://local.buttressjs.com',
-    token: 'YwwUxkdE1AkkdE8tlAkJd9UpRwJAZp9c5sMB',
-    apiPath: 'lit',
-    userId: '6335681586c39a0e9a8ec6b8',
-  };
+  private _settings: Settings = {};
 
   private _schema: {[key: string]: ButtressSchema} | null = null;
 
@@ -44,30 +53,39 @@ export class ButtressDbService extends LtnService {
   constructor() {
     super();
 
+    const dispatchCustomEvent = (type: string, options: Event) => this.dispatchEvent(new CustomEvent(type, options));
+
     this._store = new ButtressStore();
-    this._realtime = new ButtressRealtime(this._store, this._settings);
+    this._realtime = new ButtressRealtime(this._store, this._settings, dispatchCustomEvent);
   }
 
-  async connectedCallback() {
+  connectedCallback(): void {
     super.connectedCallback();
-    await this.updateComplete;
 
-    // const settingsService: LtnSettingsService | null = this._getService(
-    //   LtnSettingsService
-    // );
-    // this.__settings = settingsService
-    //   ? settingsService.getButtressSettings()
-    //   : null;
-
-    // this._debug(`connectedCallback`, this.__settings);
-
-    await this._connect();
-    await this._realtime.connect();
+    this._settings.endpoint = this.endpoint;
+    this._settings.token = this.token;
+    this._settings.apiPath = this.apiPath;
+    this._settings.userId = this.userId;
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this._debug(`disconnectedCallback`);
+  }
+
+  async connect() {
+    if (!this._settings.endpoint) {
+      throw new Error(`Missing required setting 'endpoint'`);
+    }
+    if (!this._settings.token) {
+      throw new Error(`Missing required setting 'token'`);
+    }
+    if (!this._settings.apiPath) {
+      throw new Error(`Missing required setting 'apiPath'`);
+    }
+
+    await this._connect();
+    await this._realtime.connect();
   }
 
   private async _connect() {
@@ -199,6 +217,12 @@ export class ButtressDbService extends LtnService {
     return true;
   }
 
+  createObject(path: string) : any {
+    // Work out if it's a path or sub-path
+    this._debug(`test,${path}`);
+    return {};
+  }
+
   async query(dataService: string, buttressQuery: object) {
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
@@ -213,6 +237,35 @@ export class ButtressDbService extends LtnService {
 
   setUserId(userId: string) {
     this._settings.userId = userId;
+  }
+
+
+  updated(changedProperties: Map<string, unknown>) {
+    let update = false;
+    changedProperties.forEach((oldValue, propName) => {
+      if (propName === 'endpoint') {
+        this._settings.endpoint = this.endpoint;
+        update = true;
+      }
+      else if (propName === 'token') {
+        this._settings.token = this.token;
+        update = true;
+      }
+      else if (propName === 'apiPath') {
+        this._settings.apiPath = this.apiPath;
+        update = true;
+      }
+      else if (propName === 'userId') {
+        this._settings.userId = this.userId;
+        update = true;
+      }
+    });
+
+    if (update) {
+      this.requestUpdate();
+      // Trigger reconnection?
+      // this.connect();
+    }
   }
 
   render() {

@@ -22,11 +22,13 @@ export default class ButtressDataRealtime {
 
   private _socket: any;
 
-  private _connected: boolean = false;
-
   private _synced: boolean = false;
 
   private _lastSequence: {[key: string]: number} = {};
+
+  private _dispatchCustomEvent: Function;
+
+  private _isConnected: boolean = false;
 
   private readonly _rxEvents: string[] = [
     'db-activity',
@@ -35,11 +37,13 @@ export default class ButtressDataRealtime {
     'db-disconnect-room',
   ];
 
-  constructor(store: ButtressStore, settings: Settings) {
+  constructor(store: ButtressStore, settings: Settings, dispatchCustomEvent: Function) {
     this._store = store;
     this._settings = settings;
 
     this._logger = new LtnLogger('buttress-data-realtime');
+
+    this._dispatchCustomEvent = dispatchCustomEvent;
   }
 
   connect() {
@@ -54,25 +58,42 @@ export default class ButtressDataRealtime {
 
     this._logger.debug(`Opening connection to ${uri}`);
 
+    this._dispatchCustomEvent('bjs-connection-changed', {
+      detail: true,
+      bubbles: true,
+      composed: true
+    });
+
     try {
       this._socket = io(uri, {
         query: {
           token: this._settings.token
         }
       });
-      this._socket.on('connect',() => {
-        this._logger.debug(`Connected`);
-        this._connected = true;
-        this._configureRxEvents();
-      });
-      this._socket.on('disconnect',() => {
-        this._logger.debug(`Disconnected`);
-        this._connected = false;
-      });
+      this._socket.on('connect', () => this._onConnected());
+      this._socket.on('disconnect', () => this._onDisconnected());
     } catch (err) {
-      this._connected = false;
+      this._onDisconnected();
       this._logger.error(err);
     }
+  }
+
+  set _connected(state: boolean) {
+    this._isConnected = state;
+    this._logger.debug(state ? `Connected` : `Disconnected`);
+    this._dispatchCustomEvent('bjs-connection-changed', {
+      detail: state,
+      bubbles: true,
+      composed: true
+    });
+  }
+
+  private _onConnected() {
+    this._connected = true;
+  }
+
+  private _onDisconnected() {
+    this._connected = false;
   }
 
   setLogLevel(level: LtnLogLevel) {
