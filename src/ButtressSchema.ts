@@ -1,5 +1,6 @@
-import type { ButtressSchemaProperties } from './schema/ButtressSchemaProperties.js';
-import type { ButtressSchemaProperty } from './schema/ButtressSchemaProperty.js';
+import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
+import type { ButtressSchemaProperties } from './types/ButtressSchemaProperties.js';
+import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
 export type ButtressSchema = {
   name: string,
@@ -9,89 +10,100 @@ export type ButtressSchema = {
 export default ButtressSchema;
 
 export class ButtressSchemaHelpers {
-  static getSubSchema(schema: ButtressSchema, path: string) {
-    return path.split('.').reduce((out: ButtressSchema, path: string) => {
-      if (!out) return false; // Skip all paths if we hit a false
+  static getSubSchema(schema: ButtressSchema, path: string): ButtressSchema | null {
+    return path.split('.').reduce((out: ButtressSchema | null, part: string) => {
+      if (!out) return null;
 
-      const property = getPath(out.properties, path);
+      const property = getPath(out.properties, part);
       if (!property) {
-        return false;
+        return null;
       }
       if (property.type && property.type === 'array' && !property.__schema) {
-        return false;
+        return null;
       }
 
       return {
         name: path,
         properties: property.__schema || property
-      };
+      } as ButtressSchema;
     }, schema);
   }
   
-  static getFlattened(schema: ButtressSchema) {
-    const __buildFlattenedSchema = (property: ButtressSchemaProperty, parent: ButtressSchemaProperties, path: string, flattened: {}) => {
+  static getFlattened(schema: ButtressSchema): ButtressSchemaProperties {
+    const __buildFlattenedSchema = (
+      property: string,
+      parent: ButtressSchemaProperties | ButtressSchemaProperty,
+      path: string[],
+      flattened: ButtressSchemaProperties
+    ) => {
+      type parentKey = keyof typeof parent;
+
+      let flat = flattened;
       path.push(property);
-  
+
       let isRoot = true;
-      Object.keys(parent[property]).forEach((childProp) => {
+      Object.keys(parent[property as parentKey]).forEach((childProp) => {
         if (/^__/.test(childProp)) {
           return;
         }
-  
+
         isRoot = false;
-        __buildFlattenedSchema(childProp, parent[property], path, flattened);
+        flat = Object.assign(flat, __buildFlattenedSchema(childProp, parent[property as parentKey], path, flat));
       });
   
       if (isRoot === true) {
-        flattened[path.join('.')] = parent[property];
-        path.pop();
-        return;
+        flat[path.join('.')] = parent[property as parentKey];
       }
-  
+
       path.pop();
-      return;
+      return flat;
     };
-  
-    const flattened = {};
-    const path = [];
-    for (let property in schema.properties) {
-      if (!schema.properties.hasOwnProperty(property)) continue;
-      __buildFlattenedSchema(property, schema.properties, path, flattened);
-    }
+
+    let flattened = {};
+    const path: string[] = [];
+    Object.keys(schema.properties).forEach((prop: string) => {
+      flattened = Object.assign(flattened, __buildFlattenedSchema(prop, schema.properties, path, flattened));
+    });
   
     return flattened;
   }
 
-  static inflate(schema, createId) {
-    const __inflateObject = (parent, path, value) => {
+  static inflate(schema: ButtressSchema, createId: boolean) {
+    const __inflateObject = (parent: {}, path: string[], value: any) => {
+      const parentOut = parent;
       if (path.length > 1) {
-        let parentKey = path.shift();
-        if (!parent[parentKey]) {
-          parent[parentKey] = {};
+        const parentKey = path.shift();
+        if (!parentKey) return;
+
+        if (!parentOut[parentKey]) {
+          parentOut[parentKey] = {};
         }
-        __inflateObject(parent[parentKey], path, value);
+
+        __inflateObject(parentOut[parentKey], path, value);
         return;
       }
-    
-      parent[path.shift()] = value;
-      return;
+
+      parentOut[path.shift()] = value;
+      return parentOut;
     };
-    
-    const flattenedSchema = AppDb.Schema.getFlattened(schema);
+
+    const flattenedSchema = ButtressSchemaHelpers.getFlattened(schema);
+    type flattenedSchemaKey = keyof typeof flattenedSchema;
   
-    const res = {};
+    const res: ButtressSchemaProperties = {};
     const objects = {};
-    for (let property in flattenedSchema) {
-      if (!flattenedSchema.hasOwnProperty(property)) continue;
+    Object.keys(flattenedSchema).forEach((property) => {
       const config = flattenedSchema[property];
-      let propVal = {
+      const propVal = {
         path: property,
-        value: AppDb.Factory.getPropDefault(config)
+        value: ButtressSchemaFactory.getPropDefault(config)
       };
   
       const path = propVal.path.split('.');
       const root = path.shift();
-      let value = propVal.value;
+      if (!root) return;
+
+      let {value} = propVal;
       if (path.length > 0) {
         if (!objects[root]) {
           objects[root] = {};
@@ -101,10 +113,10 @@ export class ButtressSchemaHelpers {
       }
   
       res[root] = value;
-    }
+    });
 
     if (!res.id && createId) {
-      res.id = AppDb.Factory.getPropDefault({
+      res.id = ButtressSchemaFactory.getPropDefault({
         __type: 'id',
         __default: 'new'
       });
@@ -113,32 +125,22 @@ export class ButtressSchemaHelpers {
     return res;
   }
 
-  static clean(collection, path, value) {
-    const schema = this.getSchema(collection);
+  static clean(schema: ButtressSchema, path: string, value: any) {
+    if (!schema) return false;
 
-    if (!schema) {
-      return false;
-    }
+    let val = value;
+    const flatSchema = this.getFlattened(schema);
+    Object.keys(flatSchema).forEach((flatSchemaProperty) => {
+      if (flatSchemaProperty !== path) return;
+      const schemaProp = flatSchema[flatSchemaProperty];
 
-    let flatSchema = this.getFlattened(schema);
-
-    for (let property in flatSchema) {
-      if (!flatSchema.hasOwnProperty(property)) continue;
-      if (property !== path) continue;
-      const schemaProp = flatSchema[property];
-
-      switch (schemaProp.__type) {
-        case 'boolean':
-          value = (/^true$/i).test(value);
-          break;
-        case 'number':
-          value = value.replace(/[^\d\.\-\ ]/g, '');
-          break;
+      if (schemaProp.__type === 'boolean') {
+        val = (/^true$/i).test(value);
+      } else if (schemaProp.__type === 'number') {
+        val = value.replace(/[^\d.\- ]/g, '');
       }
+    });
 
-      break;
-    }
-
-    return value;
+    return val;
   }
 }

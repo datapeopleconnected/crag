@@ -3,14 +3,18 @@ import Sugar from 'sugar';
 
 import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
 
-import type { ButtressSchemaProperties } from './schema/ButtressSchemaProperties.js';
+import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
 export class ButtressSchemaFactory {
   static create(primarySchema: ButtressSchema, path: string) {
     let schema = primarySchema;
-    if (!schema) throw new Error(`Missing schema when trying to create new object`);
+    if (!schema) throw new Error(`Missing primarySchema when attempting to create blank object`);
 
-    if (path.split('.').length > 1) schema = ButtressSchemaHelpers.getSubSchema(primarySchema, path);
+    if (path.split('.').length > 1) {
+      const subSchema = ButtressSchemaHelpers.getSubSchema(primarySchema, path);
+      if (!subSchema) throw new Error(`Unable to find schema at path ${path}`);
+      schema = subSchema;
+    }
 
     return ButtressSchemaHelpers.inflate(schema, schema === primarySchema);
   }
@@ -19,7 +23,7 @@ export class ButtressSchemaFactory {
     return new ObjectId();
   }
 
-  static getPropDefault(config: ButtressSchemaProperties) {
+  static getPropDefault(config: ButtressSchemaProperty): null | string | [] | {} {
     let res;
     // 🤨
     switch ((config.__type as unknown as string)) {
@@ -41,7 +45,7 @@ export class ButtressSchemaFactory {
         break;
       case 'id':
         if (config.__default && config.__default === 'new') {
-          res = new ObjectId();
+          res = new ObjectId().toHexString();
         } else if (config.__default) {
           res = config.__default;
         } else {
