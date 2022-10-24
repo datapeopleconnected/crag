@@ -3,7 +3,7 @@ import Sugar from 'sugar';
 
 import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
 
-import ButtressStore from "./ButtressStore.js";
+import {ButtressStore, ButtressStoreInterface} from "./ButtressStore.js";
 
 import {Settings} from './helpers.js';
 
@@ -16,7 +16,7 @@ export default class ButtressDataRealtime {
 
   private _logger: LtnLogger;
 
-  private _store: ButtressStore;
+  private _store: ButtressStoreInterface;
 
   private _settings: Settings;
 
@@ -37,7 +37,7 @@ export default class ButtressDataRealtime {
     'db-disconnect-room',
   ];
 
-  constructor(store: ButtressStore, settings: Settings, dispatchCustomEvent: Function) {
+  constructor(store: ButtressStoreInterface, settings: Settings, dispatchCustomEvent: Function) {
     this._store = store;
     this._settings = settings;
 

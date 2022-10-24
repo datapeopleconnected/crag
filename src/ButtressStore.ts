@@ -1,5 +1,14 @@
 import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
-import ButtressSchema from './ButtressSchema.js';
+import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
+
+export interface ButtressStoreInterface {
+  get: Function,
+  set: Function,
+  push: Function,
+  pushExt: Function,
+  splice: Function,
+  spliceExt:Function
+}
 
 interface PathSig {
   name: string,
@@ -10,18 +19,26 @@ interface PathSig {
   wildcard: boolean,
 }
 
-interface ChangeOpts {
+export interface NotifyChangeOpts {
   readonly?: boolean,
   silent?: boolean
 }
 
+export interface IndexSplice {
+  addedCount: number
+  index: number
+  object: any[]
+  removed: any[]
+  opts?: NotifyChangeOpts
+  type: string
+}
 interface MapAny {
   [key: string]: any
 }
 
 let dedupeId = 0;
 
-export default class ButtressStore {
+export class ButtressStore implements ButtressStoreInterface {
 
   private _logger: LtnLogger;
 
@@ -45,7 +62,7 @@ export default class ButtressStore {
     this._logger.level = level;
   }
 
-  get(path: string, root?: any): any {
+  get(path: string, root?: {}): any {
     return ButtressStore.get(path, root || this._data);
   }
 
@@ -62,23 +79,33 @@ export default class ButtressStore {
     return prop;
   }
 
-  set(path: string, value: any, opts?: ChangeOpts): string|undefined {
-    const change = opts?.silent || this.notifyPath(path, value, opts);
-    const setPath = this.setDataProperty(path, value);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+    const change = opts?.silent || this._notifyPath(path, value, opts);
+    const setPath = this._setDataProperty(path, value);
     if (change) this._invalidateData();
     return setPath;
   }
 
-  push(path: string, ...items: any[]): number {
-    return this.pushExt(path, undefined, ...items);
+  push(path: string, schema: ButtressSchema, ...items: any[]): number {
+    return this.pushExt(path, schema, undefined, ...items);
   }
 
-  pushExt(path: string, opts?: ChangeOpts, ...items: any[]): number {
-    const array = this.get(path);
+  pushExt(path: string, schema: ButtressSchema, opts?: NotifyChangeOpts, ...items: any[]): number {
+    let array = this.get(path);
 
-    if (array === undefined) {
-      // Check against schema if this path should be a array, if so
-      // create one.
+    // If we're setting a sub property of the base then we'll check the prop data type & create
+    const parts = path.split('.');
+    if (array === undefined && parts.length > 2) {
+      const prop = ButtressSchemaHelpers.getProperty(schema, parts.slice(2).join('.'));
+      if (!prop || prop.__type !== 'array') {
+        throw new Error(`Unable to call push on non-array property type: ${prop?.__type}`);
+      }
+
+      this.set(path, [], {
+        readonly: true,
+        silent: true
+      });
+      array = this.get(path);
     }
 
     const len = array.length;
@@ -86,7 +113,7 @@ export default class ButtressStore {
 
     // if (!opts?.readonly && items.length) {
     if (items.length) {
-      this.notifySplices(array, path, [{
+      this._notifySplices(array, path, [{
         index: len,
         addedCount: items.length,
         removed: [],
@@ -99,12 +126,26 @@ export default class ButtressStore {
     return ret;
   }
 
-  splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
-    return this.spliceExt(path, start, deleteCount, undefined, ...items);
+  splice(path: string, schema: ButtressSchema, start: number, deleteCount?: number, ...items: any[]): any[] {
+    return this.spliceExt(path, schema, start, deleteCount, undefined, ...items);
   }
 
-  spliceExt(path: string, start: number, deleteCount?: number, opts?: ChangeOpts, ...items: any[]): any[] {
-    const array = this.get(path);
+  spliceExt(path: string, schema: ButtressSchema, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] {
+    let array = this.get(path);
+
+    const parts = path.split('.');
+    if (array === undefined && parts.length > 2) {
+      const prop = ButtressSchemaHelpers.getProperty(schema, parts.slice(2).join('.'));
+      if (!prop || prop.__type !== 'array') {
+        throw new Error(`Unable to call push on non-array property type: ${prop?.__type}`);
+      }
+
+      this.set(path, [], {
+        readonly: true,
+        silent: true
+      });
+      array = this.get(path);
+    }
 
     let beginning = start;
 
@@ -114,10 +155,9 @@ export default class ButtressStore {
       beginning = Math.floor(beginning);
     }
 
-    const ret = (arguments.length === 2) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
-
+    const ret = (arguments.length === 3) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
     if (items.length || ret.length) {
-      this.notifySplices(array, path, [{
+      this._notifySplices(array, path, [{
         index: beginning,
         addedCount: items.length,
         removed: ret,
@@ -130,13 +170,13 @@ export default class ButtressStore {
     return ret;
   }
 
-  notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    this.notifyPath(`${path}.splices`, { indexSplices: splices });
-    this.notifyPath(`${path}.length`, array.length);
+  private _notifySplices(array: Array<any>, path: string, splices: Array<any>) {
+    this._notifyPath(`${path}.splices`, { indexSplices: splices });
+    this._notifyPath(`${path}.length`, array.length);
     this._invalidateData();
   }
 
-  setDataProperty(path: string, value: any): string|undefined {
+  private _setDataProperty(path: string, value: any): string|undefined {
     const parts = path.toString().split('.');
     let prop: any = this._data;
 
@@ -158,7 +198,7 @@ export default class ButtressStore {
     return parts.join('.');
   }
 
-  notifyPath(path: string, value?: any, opts?: ChangeOpts): boolean {
+  private _notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
     let val = value;
     if (arguments.length === 1) {
       val = this.get(path);
@@ -186,7 +226,7 @@ export default class ButtressStore {
     return changed;
   }
 
-  _invalidateData() {
+  private _invalidateData() {
     this._logger.debug(`_invalidateData _dataInvalid:${this._dataInvalid}`);
     if (!this._dataInvalid) {
       this._dataInvalid = true;
@@ -200,7 +240,7 @@ export default class ButtressStore {
     }
   }
 
-  _flushProperties() {
+  private _flushProperties() {
     const changedProps = this._dataPending;
     const old = this._dataOld;
     this._logger.debug(`_flushProperties _dataPending:${this._dataPending} _dataOld:${this._dataOld}`);
@@ -212,7 +252,7 @@ export default class ButtressStore {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _propertiesChanged(changedProps: MapAny, oldProps: MapAny | null) {
+  private _propertiesChanged(changedProps: MapAny, oldProps: MapAny | null) {
     let ran = false;
 
     this._logger.debug(`_propertiesChanged changedProps:${changedProps} oldProps:${oldProps}`);
@@ -239,7 +279,7 @@ export default class ButtressStore {
     return ran;
   }
 
-  _marshalArgs(args: any[], path: string, props: MapAny) {
+  private _marshalArgs(args: any[], path: string, props: MapAny) {
     const values = [];
 
     for (let i = 0, l = args.length; i < l; i += 1) {
@@ -275,7 +315,7 @@ export default class ButtressStore {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _pathMatchesTrigger(path: string, trigger: PathSig): boolean {
+  private _pathMatchesTrigger(path: string, trigger: PathSig): boolean {
     return (!trigger) || (trigger.name === path) ||
       !!(trigger.structured && trigger.name.indexOf(`${path}.`) === 0) ||
       !!(trigger.wildcard && path.indexOf(`${trigger.name}.`) === 0);
@@ -285,7 +325,7 @@ export default class ButtressStore {
   subscribe(pathsStr: string, fn: Function) {
     this._logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
-      .map((path) => this.parsePath(path.trim()));
+      .map((path) => this._parsePath(path.trim()));
 
     for (let i = 0; i < paths.length; i += 1) {
       if (!this._subscriptions[paths[i].rootProperty]) {
@@ -303,8 +343,10 @@ export default class ButtressStore {
     }
   }
 
+  unsubscribe() {}
+
   // eslint-disable-next-line class-methods-use-this
-  parsePath(path: string): PathSig {
+  private _parsePath(path: string): PathSig {
     const p: PathSig = {
       name: path.trim(),
       value: '',
@@ -343,8 +385,5 @@ export default class ButtressStore {
 
     return p;
   }
-
-  unsubscribe() {
-
-  }
 }
+export default ButtressStore;

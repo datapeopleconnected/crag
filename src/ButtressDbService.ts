@@ -4,7 +4,7 @@ import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
 import ButtressDataService from './ButtressDataService.js';
-import ButtressStore from './ButtressStore.js';
+import {ButtressStore, ButtressStoreInterface, NotifyChangeOpts} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
 
 import ButtressSchema from './ButtressSchema.js';
@@ -50,19 +50,35 @@ export class ButtressDbService extends LtnService {
 
   private _awaitConnectionPool: Array<Function> = [];
 
+  private _dsStoreInterface: ButtressStoreInterface;
+
   constructor() {
     super();
 
     const dispatchCustomEvent = (type: string, options: Event) => this.dispatchEvent(new CustomEvent(type, options));
 
+    // Route through the dataservices
+    // const self = this;
+    this._dsStoreInterface = {
+      get: (path: string): any => this._getDataService(path).get(path),
+      set: (path: string, value: any): string|undefined => this._getDataService(path).set(path, value),
+      push: (path: string, ...items: any[]): number => this._getDataService(path).push(path, ...items),
+      pushExt: (path: string, opts?: NotifyChangeOpts, ...items: any[]): number => this._getDataService(path).pushExt(path, opts, ...items),
+      splice: (path: string, start: number, deleteCount?: number, ...items: any[]): any[] =>
+        this._getDataService(path).splice(path, start, deleteCount, ...items),
+      spliceExt: (path: string, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] =>
+        this._getDataService(path).spliceExt(path, start, deleteCount, opts, ...items)
+    };
+
+    // Store
     this._store = new ButtressStore();
-    this._realtime = new ButtressRealtime(this._store, this._settings, dispatchCustomEvent);
+
+    // TODO: Pass through data service catpure 
+    this._realtime = new ButtressRealtime(this._dsStoreInterface, this._settings, dispatchCustomEvent);
   }
 
   connectedCallback(): void {
     super.connectedCallback();
-
-    console.log('test');
 
     this._settings.endpoint = this.endpoint;
     this._settings.token = this.token;
@@ -191,26 +207,22 @@ export class ButtressDbService extends LtnService {
 
   // eslint-disable-next-line class-methods-use-this
   get(path: string): any {
-    return this._store.get(path);
+    return this._dsStoreInterface.get(path);
   }
 
   // eslint-disable-next-line class-methods-use-this
   set(path: string, value: any): string|undefined {
-    return this._store.set(path, value);
+    return this._dsStoreInterface.set(path, value);
   }
 
   // eslint-disable-next-line class-methods-use-this
   push(path: string, ...items: any[]): number {
-    return this._store.push(path, ...items);
+    return this._dsStoreInterface.push(path, ...items);
   }
 
   // eslint-disable-next-line class-methods-use-this
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
-    if (arguments.length < 3) {
-      return this._store.splice(path, start);
-    }
-
-    return this._store.splice(path, start, deleteCount, ...items);
+    return this._dsStoreInterface.splice(path, start, deleteCount, ...items);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -224,9 +236,14 @@ export class ButtressDbService extends LtnService {
     return this._schema[name];
   }
 
+  private _getDataService(path: string): ButtressDataService {
+    const [root] = path.split('.');
+    if (!this._dataServices[root]) throw new Error(`Unable to find data service with path part ${root}`);
+    return this._dataServices[root];
+  }
+
   createObject(path: string) : any {
-    const parts = path.split('.');
-    const schema = this.getSchema(parts.shift());
+    const schema = this.getSchema(path.split('.').shift());
     if (typeof schema === 'boolean') throw new Error(`Unable to find schmea for path ${path}`);
     
     return ButtressSchemaFactory.create(schema, path);

@@ -14,7 +14,7 @@ export class ButtressSchemaHelpers {
   static getSubSchema(schema: ButtressSchema, path: string): ButtressSchema | null {
     return path.split('.').reduce((out: ButtressSchema | null, part: string) => {
       if (!out) return null;
-
+      
       const property = ButtressStore.get(part, out.properties);
       if (!property) {
         return null;
@@ -146,5 +146,23 @@ export class ButtressSchemaHelpers {
     });
 
     return val;
+  }
+
+  static getProperty(schema: ButtressSchema, path: string): ButtressSchemaProperty | undefined {
+    const parts = path.toString().split('.');
+    let props: any = schema.properties;
+
+    for (let i=0; i < parts.length; i += 1) {
+      if (!props) return undefined;
+      const part = parts[i];
+
+      if (!props[part] && props[part].__schema) {
+        props = props[part].__schema;
+      } else {
+        props = props[part];
+      }
+    }
+
+    return props;
   }
 }
