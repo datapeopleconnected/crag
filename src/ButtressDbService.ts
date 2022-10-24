@@ -8,9 +8,9 @@ import ButtressStore from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
 
 import ButtressSchema from './ButtressSchema.js';
+import {ButtressSchemaFactory} from './ButtressSchemaFactory.js'
 
 import { Settings } from './helpers.js';
-import { stringFixture } from '@open-wc/testing-helpers';
 
 export class ButtressDbService extends LtnService {
   static styles = css`
@@ -61,6 +61,8 @@ export class ButtressDbService extends LtnService {
 
   connectedCallback(): void {
     super.connectedCallback();
+
+    console.log('test');
 
     this._settings.endpoint = this.endpoint;
     this._settings.token = this.token;
@@ -217,10 +219,17 @@ export class ButtressDbService extends LtnService {
     return true;
   }
 
+  getSchema(name: string | undefined): ButtressSchema | boolean {
+    if (!name || !this._schema || !this._schema[name]) return false;
+    return this._schema[name];
+  }
+
   createObject(path: string) : any {
-    // Work out if it's a path or sub-path
-    this._debug(`test,${path}`);
-    return {};
+    const parts = path.split('.');
+    const schema = this.getSchema(parts.shift());
+    if (typeof schema === 'boolean') throw new Error(`Unable to find schmea for path ${path}`);
+    
+    return ButtressSchemaFactory.create(schema, path);
   }
 
   async query(dataService: string, buttressQuery: object) {

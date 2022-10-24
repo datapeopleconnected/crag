@@ -1,3 +1,4 @@
+import ButtressStore from './ButtressStore.js'
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import type { ButtressSchemaProperties } from './types/ButtressSchemaProperties.js';
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
@@ -14,7 +15,7 @@ export class ButtressSchemaHelpers {
     return path.split('.').reduce((out: ButtressSchema | null, part: string) => {
       if (!out) return null;
 
-      const property = getPath(out.properties, part);
+      const property = ButtressStore.get(part, out.properties);
       if (!property) {
         return null;
       }
@@ -69,29 +70,32 @@ export class ButtressSchemaHelpers {
   }
 
   static inflate(schema: ButtressSchema, createId: boolean) {
-    const __inflateObject = (parent: {}, path: string[], value: any) => {
+    const __inflateObject = (parent: {[index: string]: {}}, path: string[], value: any): {[index: string]: {}} => {
       const parentOut = parent;
       if (path.length > 1) {
         const parentKey = path.shift();
-        if (!parentKey) return;
+        if (!parentKey) return parentOut
 
         if (!parentOut[parentKey]) {
           parentOut[parentKey] = {};
         }
 
         __inflateObject(parentOut[parentKey], path, value);
-        return;
+        return parentOut;
       }
 
-      parentOut[path.shift()] = value;
+      const part = path.shift();
+      if (!part) return parentOut;
+
+      parentOut[part] = value;
       return parentOut;
     };
 
     const flattenedSchema = ButtressSchemaHelpers.getFlattened(schema);
-    type flattenedSchemaKey = keyof typeof flattenedSchema;
+    // type flattenedSchemaKey = keyof typeof flattenedSchema;
   
-    const res: ButtressSchemaProperties = {};
-    const objects = {};
+    const res: {[index: string]: any} = {};
+    const objects: {[index: string]: {}} = {};
     Object.keys(flattenedSchema).forEach((property) => {
       const config = flattenedSchema[property];
       const propVal = {

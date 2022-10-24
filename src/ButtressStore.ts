@@ -46,10 +46,13 @@ export default class ButtressStore {
   }
 
   get(path: string, root?: any): any {
-    const parts = path.toString().split('.');
-    let prop: any = root || this._data;
+    return ButtressStore.get(path, root || this._data);
+  }
 
-    // Loop over path parts[0..n-1] and dereference
+  static get(path: string, root?: any): any {
+    const parts = path.toString().split('.');
+    let prop: any = root;
+
     for (let i=0; i < parts.length; i += 1) {
       if (!prop) return undefined;
       const part = parts[i];

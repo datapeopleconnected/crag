@@ -11,7 +11,8 @@ export class ButtressSchemaFactory {
     if (!schema) throw new Error(`Missing primarySchema when attempting to create blank object`);
 
     if (path.split('.').length > 1) {
-      const subSchema = ButtressSchemaHelpers.getSubSchema(primarySchema, path);
+      const parts = path.split('.')
+      const subSchema = ButtressSchemaHelpers.getSubSchema(primarySchema, parts.slice(1, parts.length).join('.'));
       if (!subSchema) throw new Error(`Unable to find schema at path ${path}`);
       schema = subSchema;
     }
