@@ -1,6 +1,8 @@
 import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
 import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
 
+import { v4 as uuidv4 } from 'uuid';
+
 export interface ButtressStoreInterface {
   get: Function,
   set: Function,
@@ -50,7 +52,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
   private _dataOld: MapAny | null = null
 
-  private _subscriptions: {[key: string]: Array<{trigger: PathSig, info: {lastRun: number, args: Array<PathSig>}, cb: Function}>} = {};
+  private _subscriptions: {[key: string]: Array<{ref: string, trigger: PathSig, info: {lastRun: number, args: Array<PathSig>}, cb: Function}>} = {};
 
   constructor() {
     this._data = {};
@@ -322,7 +324,8 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  subscribe(pathsStr: string, fn: Function) {
+  subscribe(pathsStr: string, fn: Function): string {
+    const id = uuidv4();
     this._logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
       .map((path) => this._parsePath(path.trim()));
@@ -333,6 +336,7 @@ export class ButtressStore implements ButtressStoreInterface {
       }
 
       this._subscriptions[paths[i].rootProperty].push({
+        ref: id,
         trigger: paths[i],
         info: {
           lastRun: 0,
@@ -341,6 +345,8 @@ export class ButtressStore implements ButtressStoreInterface {
         cb: fn,
       });
     }
+
+    return id;
   }
 
   unsubscribe() {}

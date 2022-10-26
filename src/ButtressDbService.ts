@@ -91,6 +91,10 @@ export class ButtressDbService extends LtnService {
     this._debug(`disconnectedCallback`);
   }
 
+  isDbConnected(): boolean {
+    return this._connected;
+  }
+
   async connect() {
     if (!this._settings.endpoint) {
       throw new Error(`Missing required setting 'endpoint'`);
@@ -112,7 +116,7 @@ export class ButtressDbService extends LtnService {
       throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
     }
     if (!this._settings?.token) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect`);
+      throw new Error(`Missing setting 'token' while trying to connect`);
     }
 
     // Test the connection to buttress
@@ -226,9 +230,8 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  subscribe(path: string, cb: Function): boolean {
-    this._store.subscribe(path, cb);
-    return true;
+  subscribe(path: string, cb: Function): string {
+    return this._store.subscribe(path, cb);
   }
 
   getSchema(name: string | undefined): ButtressSchema | boolean {
@@ -265,6 +268,9 @@ export class ButtressDbService extends LtnService {
     this._settings.userId = userId;
   }
 
+  setToken(token: string) {
+    this._settings.token = token;
+  }
 
   updated(changedProperties: Map<string, unknown>) {
     let update = false;
