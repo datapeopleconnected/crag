@@ -1,7 +1,5 @@
-import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
+import { LtnLogger, LtnLogLevel, LtnService } from '@lighten/ltn-element';
 import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
-
-import { v4 as uuidv4 } from 'uuid';
 
 export interface ButtressStoreInterface {
   get: Function,
@@ -325,7 +323,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
   // eslint-disable-next-line class-methods-use-this
   subscribe(pathsStr: string, fn: Function): string {
-    const id = uuidv4();
+    const id = LtnService.generateId();
     this._logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
       .map((path) => this._parsePath(path.trim()));
@@ -349,7 +347,9 @@ export class ButtressStore implements ButtressStoreInterface {
     return id;
   }
 
-  unsubscribe() {}
+  unsubscribe(id: string) {
+
+  }
 
   // eslint-disable-next-line class-methods-use-this
   private _parsePath(path: string): PathSig {

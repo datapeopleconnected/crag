@@ -44,8 +44,6 @@ export class ButtressDbService extends LtnService {
 
   private _dataServices: {[key: string]: ButtressDataService} = {};
 
-  private _subscriptions: Array<{path:string, cb: Function}> = [];
-
   private _connected: boolean = false;
 
   private _awaitConnectionPool: Array<Function> = [];
@@ -55,7 +53,7 @@ export class ButtressDbService extends LtnService {
   constructor() {
     super();
 
-    const dispatchCustomEvent = (type: string, options: Event) => this.dispatchEvent(new CustomEvent(type, options));
+    const dispatchCustomEvent = (type: string, options: Event) => this.dispatchCustomEvent(type, options);
 
     // Route through the dataservices
     // const self = this;
@@ -139,8 +137,10 @@ export class ButtressDbService extends LtnService {
     this._debug('_fetchAppSchema', this._settings);
     if (!this._settings) return;
 
+    // eslint-disable-next-line no-undef
     const req: RequestInfo = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
 
+    // eslint-disable-next-line no-undef
     const init: RequestInit = {
       method: 'GET',
       cache: 'no-cache',
