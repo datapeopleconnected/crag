@@ -10,6 +10,11 @@ export interface ButtressStoreInterface {
   spliceExt:Function
 }
 
+export interface ButtressEntity {
+  [index: string]: any;
+  id: string
+}
+
 interface PathSig {
   name: string,
   value: string | number,
@@ -36,13 +41,27 @@ interface MapAny {
   [key: string]: any
 }
 
+interface Subscription {
+  ref: string,
+  trigger: PathSig,
+  info: {
+    lastRun: number,
+    args: Array<PathSig>
+  },
+  cb: Function
+}
+interface Subscriptions {
+  [key: string]: Array<Subscription>
+}
+
 let dedupeId = 0;
 
 export class ButtressStore implements ButtressStoreInterface {
 
   private _logger: LtnLogger;
 
-  private _data: {[key: string]: ButtressSchema};
+  // private _data: {[key: string]: ButtressEntity} = {};
+  private _data: Map<string, Map<string, ButtressEntity>> = new Map();
 
   private _dataInvalid: boolean = false;
 
@@ -50,11 +69,9 @@ export class ButtressStore implements ButtressStoreInterface {
 
   private _dataOld: MapAny | null = null
 
-  private _subscriptions: {[key: string]: Array<{ref: string, trigger: PathSig, info: {lastRun: number, args: Array<PathSig>}, cb: Function}>} = {};
+  private _subscriptions: Subscriptions = {};
 
   constructor() {
-    this._data = {};
-
     this._logger = new LtnLogger('buttress-store');
   }
 
@@ -347,8 +364,19 @@ export class ButtressStore implements ButtressStoreInterface {
     return id;
   }
 
-  unsubscribe(id: string) {
+  unsubscribe(id: string): boolean {
+    let result = false;
+    this._logger.debug('Scrubbing subscription with referece: ', id);
 
+    Object.keys(this._subscriptions).forEach((key) => {
+      const matches = this._subscriptions[key].filter((obj) => obj.ref !== id);
+      if (this._subscriptions[key].length !== matches.length) {
+        this._subscriptions[key] = matches;
+        result = true;
+      }
+    });
+
+    return result;
   }
 
   // eslint-disable-next-line class-methods-use-this

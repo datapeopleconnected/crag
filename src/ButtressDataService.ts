@@ -1,11 +1,11 @@
 import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
-import {ObjectId} from 'bson';
+import { ObjectId } from 'bson';
 
 import ButtressSchema from './ButtressSchema.js';
 
-import {ButtressStore, NotifyChangeOpts, ButtressStoreInterface, IndexSplice} from './ButtressStore.js';
+import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, IndexSplice, ButtressEntity } from './ButtressStore.js';
 
-import {Settings} from './helpers.js';
+import { Settings } from './helpers.js';
 
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;

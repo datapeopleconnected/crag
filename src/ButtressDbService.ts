@@ -234,6 +234,10 @@ export class ButtressDbService extends LtnService {
     return this._store.subscribe(path, cb);
   }
 
+  unsubscribe(id: string): boolean {
+    return this._store.unsubscribe(id);
+  }
+
   getSchema(name: string | undefined): ButtressSchema | boolean {
     if (!name || !this._schema || !this._schema[name]) return false;
     return this._schema[name];
