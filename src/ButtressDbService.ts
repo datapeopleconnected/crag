@@ -4,11 +4,11 @@ import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
 import ButtressDataService from './ButtressDataService.js';
-import {ButtressStore, ButtressStoreInterface, NotifyChangeOpts} from './ButtressStore.js';
+import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
 
 import ButtressSchema from './ButtressSchema.js';
-import {ButtressSchemaFactory} from './ButtressSchemaFactory.js'
+import {ButtressSchemaFactory} from './ButtressSchemaFactory.js';
 
 import { Settings } from './helpers.js';
 
@@ -58,6 +58,9 @@ export class ButtressDbService extends LtnService {
     // Route through the dataservices
     // const self = this;
     this._dsStoreInterface = {
+      create: (service: string, value: ButtressEntity): string|undefined => this._getDataService(service).create(value),
+      delete: (service: string, id: string): boolean => this._getDataService(service).delete(id),
+
       get: (path: string): any => this._getDataService(path).get(path),
       set: (path: string, value: any): string|undefined => this._getDataService(path).set(path, value),
       push: (path: string, ...items: any[]): number => this._getDataService(path).push(path, ...items),
@@ -207,6 +210,22 @@ export class ButtressDbService extends LtnService {
 
     const dataServices: string[] = Object.keys(this._dataServices || []);
     dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
+  }
+
+  create(path: string, value: ButtressEntity): string|undefined {
+    const parts = path.toString().split('.');
+    if (parts.length > 1) throw new Error('Create is only avaible for top level entities');
+    const [schema] = parts;
+
+    return this._dsStoreInterface.create(schema, value);
+  }
+
+  delete(path: string): boolean {
+    const parts = path.toString().split('.');
+    if (parts.length > 2) throw new Error('Delete is only avaible for top level entities');
+    const [schema, id] = parts;
+
+    return this._dsStoreInterface.delete(schema, id);
   }
 
   // eslint-disable-next-line class-methods-use-this

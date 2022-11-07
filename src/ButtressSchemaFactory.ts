@@ -20,8 +20,8 @@ export class ButtressSchemaFactory {
     return ButtressSchemaHelpers.inflate(schema, schema === primarySchema);
   }
 
-  static getObjectId() {
-    return new ObjectId();
+  static getObjectId(): string {
+    return new ObjectId().toHexString();
   }
 
   static getPropDefault(config: ButtressSchemaProperty): null | string | [] | {} {

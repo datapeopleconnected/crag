@@ -4,6 +4,8 @@ import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
 export interface ButtressStoreInterface {
   get: Function,
   set: Function,
+  create: Function,
+  delete: Function,
   push: Function,
   pushExt: Function,
   splice: Function,
@@ -79,6 +81,37 @@ export class ButtressStore implements ButtressStoreInterface {
     this._logger.level = level;
   }
 
+  create(schema: string, value: ButtressEntity) {
+    if (!value.id) throw new Error('Unable to create object without providing an ID');
+
+    return this.set(`${schema}.${value.id}`, value);
+  }
+
+  delete(path: string) {
+    const parts = path.toString().split('.');
+    const id = parts.pop();
+    const prePath = parts.join('.');
+
+    if (!id) throw new Error('Unable to remove property');
+
+    const parent = this.get(prePath);
+    const isMap = (parent instanceof Map); 
+    const prop = (isMap) ? parent.get(id) : parent[id];
+
+    this._notifyPath(`${path}.splices`, { indexSplices: [{
+      index: 0,
+      addedCount: 0,
+      removed: [prop],
+      object: parent,
+      type: 'splice',
+    }] });
+
+    const change = (isMap) ? parent.delete(id) : delete parent[id];
+    if (change) this._invalidateData();
+
+    return change;
+  }
+
   get(path: string, root?: {}): any {
     return ButtressStore.get(path, root || this._data);
   }
@@ -90,7 +123,7 @@ export class ButtressStore implements ButtressStoreInterface {
     for (let i=0; i < parts.length; i += 1) {
       if (!prop) return undefined;
       const part = parts[i];
-      prop = prop[part];
+      prop = (prop instanceof Map) ? prop.get(part) : prop[part];
     }
 
     return prop;
@@ -199,16 +232,20 @@ export class ButtressStore implements ButtressStoreInterface {
 
     const last = parts[parts.length-1];
     if (parts.length > 1) {
-      // Loop over path parts[0..n-2] and dereference
       for (let i = 0; i < parts.length - 1; i += 1) {
         const part = parts[i];
-        prop = prop[part];
+        prop = (prop instanceof Map) ? prop.get(part) : prop[part];
         if (!prop) return undefined;
       }
       // Set value to object at end of path
-      prop[last] = value;
+      if (prop instanceof Map) {
+        prop.set(last, value);
+      } else {
+        prop[last] = value;
+      }
+    } else if (prop instanceof Map) {
+      prop.set(path, value);
     } else {
-      // Simple property set
       prop[path] = value;
     }
 
