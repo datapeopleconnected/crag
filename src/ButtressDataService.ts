@@ -254,6 +254,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     //   data.sort((a: any, b: any) => this.__sort(a, b));
     }
 
+    if (opts?.limit) {
+      data = data.splice(opts.skip || 0, opts.limit);
+    }
+
     return {
       skip: opts?.skip,
       limit: opts?.limit,
@@ -357,7 +361,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async search(buttressQuery: any, limit?: number, skip?: number, sort?: any, project?: any): Promise<any> {
     if (!this._settings) return undefined;
 
-    const hash = this._hashQuery(buttressQuery);
+    const hash = this._hashQuery({buttressQuery, limit, skip, sort, project});
     if (this._queryMap.indexOf(`${hash}`) !== -1) return Promise.resolve(false);
 
     const body = await this.__generateSearchRequest(buttressQuery, limit, skip, sort, project);

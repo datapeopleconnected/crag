@@ -275,11 +275,11 @@ export class ButtressDbService extends LtnService {
     return ButtressSchemaFactory.create(schema, path);
   }
 
-  async query(dataService: string, buttressQuery: object) {
+  async query(dataService: string, buttressQuery: any, limit: number = 50, skip: number = 0, sort?: any) {
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
 
-    return ds.query(buttressQuery);
+    return ds.query(buttressQuery, limit, skip, sort);
   }
 
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {
