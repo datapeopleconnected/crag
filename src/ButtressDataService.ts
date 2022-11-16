@@ -14,6 +14,13 @@ export interface QueryResult {
   total: number,
   results: ButtressEntity[]
 }
+export interface QueryOpts {
+  limit?: number
+  skip?: number
+  sort?: any
+  project?: any
+  bust?: boolean
+}
 
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
@@ -31,6 +38,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private _queryMap: Array<string> = [];
 
   private _requestQueue: Array<any> = [];
+
+  private __awaitIdleQueue: Array<Function> = [];
 
   status: string = 'pending';
 
@@ -106,6 +115,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // eslint-disable-next-line class-methods-use-this
   _processDataChange(cr: any) : void {
+    console.log('_processDataChange', cr.path);
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -224,19 +234,21 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._schema = schema;
   }
 
-  async query(buttressQuery: any, limit: number = 50, skip: number = 0, sort?: any): Promise<QueryResult> {
+  async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
     if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
-    await this.search(buttressQuery, limit, skip, sort);
+    // We only need to make a call to fetch the data into our local store. We then
+    // filter the data in the local store to get the results of the query.
+    await this.search(buttressQuery, opts);
 
-    // Count but search should return this...
+    // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery);
 
     return this.__filterLocalData(buttressQuery, {
-      limit,
-      skip,
+      limit: opts?.limit,
+      skip: opts?.skip,
       total,
-      sort
+      sort: opts?.sort
     });
   }
 
@@ -358,13 +370,19 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return data.filter(fns[operator](operand));
   }
 
-  async search(buttressQuery: any, limit?: number, skip?: number, sort?: any, project?: any): Promise<any> {
+  async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
     if (!this._settings) return undefined;
 
-    const hash = this._hashQuery({buttressQuery, limit, skip, sort, project});
-    if (this._queryMap.indexOf(`${hash}`) !== -1) return Promise.resolve(false);
+    // Rules on busting the hash
+    const hash = this._hashQuery({buttressQuery, limit: opts?.limit, skip: opts?.skip, sort: opts?.sort, project: opts?.project});
+    const hashIdx = this._queryMap.indexOf(`${hash}`);
+    if (opts?.bust && hashIdx !== -1) {
+      this._queryMap.splice(hashIdx, 1);
+    } else if (hashIdx !== -1) {
+      return Promise.resolve(false);
+    }
 
-    const body = await this.__generateSearchRequest(buttressQuery, limit, skip, sort, project);
+    const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, opts?.sort, opts?.project);
 
     this._store.set(this.name, new Map([...this.get(this.name), ...body.map((o: any) => [o.id, o])]), {
       silent: true
@@ -392,10 +410,28 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   private __updateQueue(): undefined {
-    if (this._requestQueue.length === 0) return;
+    if (this._requestQueue.length === 0) {
+      this.__awaitIdleQueue.forEach((resolve) => resolve(true));
+      return;
+    };
     if (this.status === 'working') return;
     // TODO: Debounce method
     this.__reduceRequests();
+  }
+
+  async nextIdle(): Promise<boolean> {
+    return new Promise((r) => {
+      queueMicrotask(() => {
+        if (this._requestQueue.length === 0) {
+          console.log(`await nextIdle ${this.name} already ready`);
+          r(true);
+          return;
+        };
+
+        console.log(`await nextIdle ${this.name} queue`);
+        this.__awaitIdleQueue.push(r);
+      })
+    });
   }
 
   // _generateListRequest(): Promise<void> {
@@ -530,6 +566,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   private async __generateRequest(request: any) {
+    console.log(`Sending request: ${request.url}`);
     const body = (request.body) ? JSON.stringify(request.body) : null;
     try {
       const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}`, {
@@ -555,6 +592,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
       if (request.reject) request.reject(err);
       this.status = 'error';
     } finally {
+      console.log(`Finally: ${request.url}`);
       this.__updateQueue();
     }
   }

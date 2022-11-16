@@ -3,7 +3,7 @@ import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
-import ButtressDataService from './ButtressDataService.js';
+import ButtressDataService, { QueryOpts } from './ButtressDataService.js';
 import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
 
@@ -257,6 +257,10 @@ export class ButtressDbService extends LtnService {
     return this._store.unsubscribe(id);
   }
 
+  async nextIdle(dataService: string) {
+    return this._getDataService(dataService).nextIdle();
+  }
+
   getSchema(name: string | undefined): ButtressSchema | boolean {
     if (!name || !this._schema || !this._schema[name]) return false;
     return this._schema[name];
@@ -275,11 +279,11 @@ export class ButtressDbService extends LtnService {
     return ButtressSchemaFactory.create(schema, path);
   }
 
-  async query(dataService: string, buttressQuery: any, limit: number = 50, skip: number = 0, sort?: any) {
+  async query(dataService: string, buttressQuery: any, opts?: QueryOpts) {
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
 
-    return ds.query(buttressQuery, limit, skip, sort);
+    return ds.query(buttressQuery, opts);
   }
 
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {

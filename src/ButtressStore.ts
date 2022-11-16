@@ -28,7 +28,8 @@ interface PathSig {
 
 export interface NotifyChangeOpts {
   readonly?: boolean,
-  silent?: boolean
+  silent?: boolean,
+  splice?: boolean,
 }
 
 export interface IndexSplice {
@@ -60,25 +61,25 @@ let dedupeId = 0;
 
 export class ButtressStore implements ButtressStoreInterface {
 
-  private _logger: LtnLogger;
+  private __logger: LtnLogger;
 
-  // private _data: {[key: string]: ButtressEntity} = {};
-  private _data: Map<string, Map<string, ButtressEntity>> = new Map();
+  // private __data: {[key: string]: ButtressEntity} = {};
+  private __data: Map<string, Map<string, ButtressEntity>> = new Map();
 
-  private _dataInvalid: boolean = false;
+  private __dataInvalid: boolean = false;
 
-  private _dataPending: MapAny | null = null;
+  private __dataPending: MapAny | null = null;
 
-  private _dataOld: MapAny | null = null
+  private __dataOld: MapAny | null = null
 
-  private _subscriptions: Subscriptions = {};
+  private __subscriptions: Subscriptions = {};
 
   constructor() {
-    this._logger = new LtnLogger('buttress-store');
+    this.__logger = new LtnLogger('buttress-store');
   }
 
   setLogLevel(level: LtnLogLevel) {
-    this._logger.level = level;
+    this.__logger.level = level;
   }
 
   create(schema: string, value: ButtressEntity) {
@@ -98,7 +99,7 @@ export class ButtressStore implements ButtressStoreInterface {
     const isMap = (parent instanceof Map); 
     const prop = (isMap) ? parent.get(id) : parent[id];
 
-    this._notifyPath(`${path}.splices`, { indexSplices: [{
+    this.__notifyPath(`${path}.splices`, { indexSplices: [{
       index: 0,
       addedCount: 0,
       removed: [prop],
@@ -107,13 +108,13 @@ export class ButtressStore implements ButtressStoreInterface {
     }] });
 
     const change = (isMap) ? parent.delete(id) : delete parent[id];
-    if (change) this._invalidateData();
+    if (change) this.__invalidateData();
 
     return change;
   }
 
   get(path: string, root?: {}): any {
-    return ButtressStore.get(path, root || this._data);
+    return ButtressStore.get(path, root || this.__data);
   }
 
   static get(path: string, root?: any): any {
@@ -130,9 +131,9 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
-    const change = opts?.silent || this._notifyPath(path, value, opts);
-    const setPath = this._setDataProperty(path, value);
-    if (change) this._invalidateData();
+    const change = opts?.silent || this.__notifyPath(path, value, opts);
+    const setPath = this.__setDataProperty(path, value);
+    if (change) this.__invalidateData();
     return setPath;
   }
 
@@ -163,7 +164,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
     // if (!opts?.readonly && items.length) {
     if (items.length) {
-      this._notifySplices(array, path, [{
+      this.__notifySplices(array, path, [{
         index: len,
         addedCount: items.length,
         removed: [],
@@ -207,7 +208,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
     const ret = (arguments.length === 3) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
     if (items.length || ret.length) {
-      this._notifySplices(array, path, [{
+      this.__notifySplices(array, path, [{
         index: beginning,
         addedCount: items.length,
         removed: ret,
@@ -220,15 +221,15 @@ export class ButtressStore implements ButtressStoreInterface {
     return ret;
   }
 
-  private _notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    this._notifyPath(`${path}.splices`, { indexSplices: splices });
-    this._notifyPath(`${path}.length`, array.length);
-    this._invalidateData();
+  private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {
+    this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
+    this.__notifyPath(`${path}.length`, array.length);
+    this.__invalidateData();
   }
 
-  private _setDataProperty(path: string, value: any): string|undefined {
+  private __setDataProperty(path: string, value: any): string|undefined {
     const parts = path.toString().split('.');
-    let prop: any = this._data;
+    let prop: any = this.__data;
 
     const last = parts[parts.length-1];
     if (parts.length > 1) {
@@ -252,77 +253,101 @@ export class ButtressStore implements ButtressStoreInterface {
     return parts.join('.');
   }
 
-  private _notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
+  private __notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
     let val = value;
     if (arguments.length === 1) {
       val = this.get(path);
     }
 
+    console.log('Notify: ', path);
+
     const old = this.get(path);
     const changed = old !== val;
 
     if (changed) {
-      if (!this._dataPending) {
-        this._dataPending = {};
-        this._dataOld = {};
+      if (!this.__dataPending) {
+        this.__dataPending = {};
+        this.__dataOld = {};
       }
 
-      if (this._dataOld && !(path in this._dataOld)) {
-        this._dataOld[path] = old;
+      if (this.__dataOld && !(path in this.__dataOld)) {
+        this.__dataOld[path] = old;
       }
 
-      this._dataPending[path] = {
-        value,
-        opts
-      };
+      if (opts?.splice) {
+        if (!this.__dataPending[path]) {
+          this.__dataPending[path] = [];
+        }
+
+        this.__dataPending[path].push({
+          value,
+          opts
+        });
+      } else {
+        this.__dataPending[path] = {
+          value,
+          opts
+        };
+      }
     }
 
     return changed;
   }
 
-  private _invalidateData() {
-    this._logger.debug(`_invalidateData _dataInvalid:${this._dataInvalid}`);
-    if (!this._dataInvalid) {
-      this._dataInvalid = true;
-      // queueMicrotask(() => {
-      // Bundle up changes
-        if (this._dataInvalid) {
-          this._dataInvalid = false;
-          this._flushProperties();
+  private __invalidateData() {
+    this.__logger.debug(`__invalidateData __dataInvalid:${this.__dataInvalid}`);
+    if (!this.__dataInvalid) {
+      this.__dataInvalid = true;
+      queueMicrotask(() => {
+        // Bundle up changes
+        if (this.__dataInvalid) {
+          this.__dataInvalid = false;
+          this.__flushProperties();
         }
-      // });
+      });
     }
   }
 
-  private _flushProperties() {
-    const changedProps = this._dataPending;
-    const old = this._dataOld;
-    this._logger.debug(`_flushProperties _dataPending:${this._dataPending} _dataOld:${this._dataOld}`);
+  private __flushProperties() {
+    const changedProps = this.__dataPending;
+    this.__logger.debug(`__flushProperties __dataPending:`, this.__dataPending);
     if (changedProps !== null) {
-      this._dataPending = null;
-      this._dataOld = null;
-      this._propertiesChanged(changedProps, old);
+      this.__dataPending = null;
+      this.__dataOld = null;
+      this.__propertiesChanged(changedProps);
     }
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private _propertiesChanged(changedProps: MapAny, oldProps: MapAny | null) {
+  private __propertiesChanged(changedProps: MapAny) {
     let ran = false;
 
-    this._logger.debug(`_propertiesChanged changedProps:${changedProps} oldProps:${oldProps}`);
+    this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
+    console.log(`__propertiesChanged changedProps: `, changedProps);
 
     // eslint-disable-next-line no-multi-assign
     const id = dedupeId += 1;
     for (const prop of Object.keys(changedProps)) {
       const rootProperty = (prop.indexOf('.') === -1) ? prop : prop.slice(0, prop.indexOf('.'));
-      const fxs = this._subscriptions[rootProperty];
+      const fxs = this.__subscriptions[rootProperty];
+      this.__logger.debug(`__propertiesChanged changed prop: ${prop}, got ${fxs?.length} fxs`);
       if (fxs) {
         for (let i = 0; i < fxs.length; i += 1) {
           const fx = fxs[i];
 
-          if (fx.info.lastRun !== id && this._pathMatchesTrigger(prop, fx.trigger)) {
+          const trigger = this.__pathMatchesTrigger(prop, fx.trigger);
+
+          this.__logger.debug(`__propertiesChanged fx: ${i}: lastRun: ${id} !== ${fx.info.lastRun}, trigger: ${trigger}`);
+          // if (fx.info.lastRun !== id && trigger) {
+          if (trigger) {
             fx.info.lastRun = id;
-            fx.cb(...this._marshalArgs(fx.info.args, prop, changedProps));
+
+            if (Array.isArray(changedProps[prop])) {
+              console.log('__propertiesChanged got Array', changedProps[prop]);
+              changedProps[prop].forEach((p: any) => fx.cb(...this.__marshalArgs(fx.info.args, prop, p)));
+            } else {
+              fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]));
+            }
 
             ran = true;
           }
@@ -333,7 +358,7 @@ export class ButtressStore implements ButtressStoreInterface {
     return ran;
   }
 
-  private _marshalArgs(args: any[], path: string, props: MapAny) {
+  private __marshalArgs(args: any[], path: string, changedProp: any) {
     const values = [];
 
     for (let i = 0, l = args.length; i < l; i += 1) {
@@ -343,22 +368,22 @@ export class ButtressStore implements ButtressStoreInterface {
         if (wildcard) {
           const matches = path.indexOf(`${name}.`) === 0;
           const p = matches ? path : name;
-          const pathValue = (this.get(p) === undefined) ? props[p].value : this.get(p);
+          const pathValue = (this.get(p) === undefined) ? changedProp[p].value : this.get(p);
           value = {
             path: matches ? path : name,
             value: pathValue,
             base: matches ? this.get(name) : pathValue,
-            opts: props[p]?.opts
+            opts: changedProp[p]?.opts
           };
         } else if (structured) {
           value = {
-            value: (this.get(name) === undefined) ? props[name].value : this.get(name),
-            opts: props[name]?.opts
+            value: (this.get(name) === undefined) ? changedProp[name].value : this.get(name),
+            opts: changedProp[name]?.opts
           };
         } else {
           value = {
             value: this.get(name),
-            opts: props[name]?.opts
+            opts: changedProp[name]?.opts
           };
         }
       }
@@ -369,7 +394,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private _pathMatchesTrigger(path: string, trigger: PathSig): boolean {
+  private __pathMatchesTrigger(path: string, trigger: PathSig): boolean {
     return (!trigger) || (trigger.name === path) ||
       !!(trigger.structured && trigger.name.indexOf(`${path}.`) === 0) ||
       !!(trigger.wildcard && path.indexOf(`${trigger.name}.`) === 0);
@@ -378,16 +403,16 @@ export class ButtressStore implements ButtressStoreInterface {
   // eslint-disable-next-line class-methods-use-this
   subscribe(pathsStr: string, fn: Function): string {
     const id = LtnService.generateId();
-    this._logger.debug('subscribe', pathsStr);
+    this.__logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
-      .map((path) => this._parsePath(path.trim()));
+      .map((path) => this.__parsePath(path.trim()));
 
     for (let i = 0; i < paths.length; i += 1) {
-      if (!this._subscriptions[paths[i].rootProperty]) {
-        this._subscriptions[paths[i].rootProperty] = [];
+      if (!this.__subscriptions[paths[i].rootProperty]) {
+        this.__subscriptions[paths[i].rootProperty] = [];
       }
 
-      this._subscriptions[paths[i].rootProperty].push({
+      this.__subscriptions[paths[i].rootProperty].push({
         ref: id,
         trigger: paths[i],
         info: {
@@ -403,12 +428,12 @@ export class ButtressStore implements ButtressStoreInterface {
 
   unsubscribe(id: string): boolean {
     let result = false;
-    this._logger.debug('Scrubbing subscription with referece: ', id);
+    this.__logger.debug('Scrubbing subscription with referece: ', id);
 
-    Object.keys(this._subscriptions).forEach((key) => {
-      const matches = this._subscriptions[key].filter((obj) => obj.ref !== id);
-      if (this._subscriptions[key].length !== matches.length) {
-        this._subscriptions[key] = matches;
+    Object.keys(this.__subscriptions).forEach((key) => {
+      const matches = this.__subscriptions[key].filter((obj) => obj.ref !== id);
+      if (this.__subscriptions[key].length !== matches.length) {
+        this.__subscriptions[key] = matches;
         result = true;
       }
     });
@@ -417,7 +442,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private _parsePath(path: string): PathSig {
+  private __parsePath(path: string): PathSig {
     const p: PathSig = {
       name: path.trim(),
       value: '',
