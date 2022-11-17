@@ -115,7 +115,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // eslint-disable-next-line class-methods-use-this
   _processDataChange(cr: any) : void {
-    console.log('_processDataChange', cr.path);
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -423,12 +422,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return new Promise((r) => {
       queueMicrotask(() => {
         if (this._requestQueue.length === 0) {
-          console.log(`await nextIdle ${this.name} already ready`);
           r(true);
           return;
         };
 
-        console.log(`await nextIdle ${this.name} queue`);
         this.__awaitIdleQueue.push(r);
       })
     });
@@ -566,7 +563,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   private async __generateRequest(request: any) {
-    console.log(`Sending request: ${request.url}`);
     const body = (request.body) ? JSON.stringify(request.body) : null;
     try {
       const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}`, {
@@ -592,7 +588,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
       if (request.reject) request.reject(err);
       this.status = 'error';
     } finally {
-      console.log(`Finally: ${request.url}`);
       this.__updateQueue();
     }
   }

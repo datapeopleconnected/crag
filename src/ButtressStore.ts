@@ -259,8 +259,6 @@ export class ButtressStore implements ButtressStoreInterface {
       val = this.get(path);
     }
 
-    console.log('Notify: ', path);
-
     const old = this.get(path);
     const changed = old !== val;
 
@@ -323,7 +321,6 @@ export class ButtressStore implements ButtressStoreInterface {
     let ran = false;
 
     this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
-    console.log(`__propertiesChanged changedProps: `, changedProps);
 
     // eslint-disable-next-line no-multi-assign
     const id = dedupeId += 1;
@@ -343,7 +340,6 @@ export class ButtressStore implements ButtressStoreInterface {
             fx.info.lastRun = id;
 
             if (Array.isArray(changedProps[prop])) {
-              console.log('__propertiesChanged got Array', changedProps[prop]);
               changedProps[prop].forEach((p: any) => fx.cb(...this.__marshalArgs(fx.info.args, prop, p)));
             } else {
               fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]));
