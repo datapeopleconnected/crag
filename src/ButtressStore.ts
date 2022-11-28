@@ -364,22 +364,22 @@ export class ButtressStore implements ButtressStoreInterface {
         if (wildcard) {
           const matches = path.indexOf(`${name}.`) === 0;
           const p = matches ? path : name;
-          const pathValue = (this.get(p) === undefined) ? changedProp[p].value : this.get(p);
+          const pathValue = (this.get(p) === undefined) ? changedProp.value : this.get(p);
           value = {
             path: matches ? path : name,
             value: pathValue,
             base: matches ? this.get(name) : pathValue,
-            opts: changedProp[p]?.opts
+            opts: changedProp.opts
           };
         } else if (structured) {
           value = {
-            value: (this.get(name) === undefined) ? changedProp[name].value : this.get(name),
-            opts: changedProp[name]?.opts
+            value: (this.get(name) === undefined) ? changedProp.value : this.get(name),
+            opts: changedProp.opts
           };
         } else {
           value = {
             value: this.get(name),
-            opts: changedProp[name]?.opts
+            opts: changedProp.opts
           };
         }
       }
