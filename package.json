@@ -3,7 +3,7 @@
   "description": "Webcomponent buttress-db-service following open-wc recommendations",
   "license": "MIT",
   "author": "buttress-db-service",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "main": "./dist/src/index.js",
   "module": "./dist/src/index.js",
   "exports": {
@@ -24,7 +24,7 @@
     "storybook:build": "tsc && npm run analyze -- --exclude dist && build-storybook"
   },
   "dependencies": {
-    "@lighten/ltn-element": "0.0.5",
+    "@lighten/ltn-element": "0.0.6",
     "bson": "~4.7.0",
     "lit": "^2.4.1",
     "socket.io-client": "^4.5.3",
