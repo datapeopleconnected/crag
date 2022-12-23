@@ -34,6 +34,12 @@ export class ButtressDbService extends LtnService {
   @property({type: String})
   userId?: string;
 
+  @property({type: String})
+  test?: string;
+
+  @property({type: [], attribute: 'core-schema'})
+  coreSchema?: string[];
+
   private _store: ButtressStore;
 
   private _realtime: ButtressRealtime;
@@ -85,6 +91,7 @@ export class ButtressDbService extends LtnService {
     this._settings.token = this.token;
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
+    this._settings.coreSchema = this.coreSchema;
   }
 
   disconnectedCallback() {
@@ -141,7 +148,12 @@ export class ButtressDbService extends LtnService {
     if (!this._settings) return;
 
     // eslint-disable-next-line no-undef
-    const req: RequestInfo = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
+    let url = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
+    if (this.coreSchema) {
+      url = url + `&core=${this._settings.coreSchema}`;
+    }
+
+    const req: RequestInfo = url;
 
     // eslint-disable-next-line no-undef
     const init: RequestInit = {
@@ -316,6 +328,10 @@ export class ButtressDbService extends LtnService {
       }
       else if (propName === 'userId') {
         this._settings.userId = this.userId;
+        update = true;
+      }
+      else if (propName === 'coreSchema') {
+        this._settings.coreSchema = this.coreSchema;
         update = true;
       }
     });
