@@ -1,3 +1,4 @@
+import Sugar from 'sugar';
 import { html, css } from 'lit';
 import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
@@ -34,11 +35,8 @@ export class ButtressDbService extends LtnService {
   @property({type: String})
   userId?: string;
 
-  @property({type: String})
-  test?: string;
-
-  @property({type: [], attribute: 'core-schema'})
-  coreSchema?: string[];
+  @property({type: Array, attribute: 'core-schema'})
+  coreSchema?: Array<string>;
 
   private _store: ButtressStore;
 
@@ -91,7 +89,7 @@ export class ButtressDbService extends LtnService {
     this._settings.token = this.token;
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
-    this._settings.coreSchema = this.coreSchema;
+    this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
   }
 
   disconnectedCallback() {
@@ -150,10 +148,10 @@ export class ButtressDbService extends LtnService {
     // eslint-disable-next-line no-undef
     let url = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
     if (this.coreSchema) {
-      url = url + `&core=${this._settings.coreSchema}`;
+      url += `&core=${this._settings.coreSchema}`;
     }
 
-    const req: RequestInfo = url;
+    const req = url;
 
     // eslint-disable-next-line no-undef
     const init: RequestInit = {
@@ -192,7 +190,8 @@ export class ButtressDbService extends LtnService {
       if (dataServices.includes(name)) {
         this._dataServices[name].updateSchema(this._schema[name]);
       } else {
-        this._dataServices[name] = new ButtressDataService(name, this._settings, this._store, this._schema[name]);
+        const isCore = (this.coreSchema && this.coreSchema?.length > 0) ? this.coreSchema?.some((s) => name.includes(Sugar.String.camelize(s, false)) ) : false;
+        this._dataServices[name] = new ButtressDataService(name, isCore, this._settings, this._store, this._schema[name]);
         if (this._settings.logLevel) {
           this._dataServices[name].setLogLevel(this._settings.logLevel);
         }

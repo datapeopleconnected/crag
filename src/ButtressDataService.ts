@@ -49,8 +49,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   bundlingChunk: number = 100;
 
-  constructor(name: string, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
+  constructor(name: string, core: boolean, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
     this.name = name;
+    this.core = core;
     this._settings = settings;
 
     this._logger = new LtnLogger(`buttress-data-service-${name}`);
@@ -597,6 +598,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
       return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.name}/${parts.join('/')}`;
     }
 
-    return `${this._settings.endpoint}/${this._settings.apiPath}/${this.name}/${parts.join('/')}`;
+    return `${this._settings.endpoint}/api/v1/${this.name}/${parts.join('/')}`;
   }
 }
