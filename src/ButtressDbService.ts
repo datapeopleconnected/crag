@@ -147,7 +147,7 @@ export class ButtressDbService extends LtnService {
 
     // eslint-disable-next-line no-undef
     let url = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
-    if (this.coreSchema) {
+    if (this._settings.coreSchema) {
       url += `&core=${this._settings.coreSchema}`;
     }
 
@@ -184,16 +184,18 @@ export class ButtressDbService extends LtnService {
     const dataServices: string[] = Object.keys(this._dataServices || []);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
-
+    const coreSchema = this._settings?.coreSchema;
     schemas.forEach((name) => {
       if (!this._schema) return;
-      if (dataServices.includes(name)) {
-        this._dataServices[name].updateSchema(this._schema[name]);
+      // TODO change apps and users api to app and user to be consistent with the endpoints
+      const endpointName = this._singularise(name);
+      if (dataServices.includes(endpointName)) {
+        this._dataServices[endpointName].updateSchema(this._schema[name]);
       } else {
-        const isCore = (this.coreSchema && this.coreSchema?.length > 0) ? this.coreSchema?.some((s) => name.includes(Sugar.String.camelize(s, false)) ) : false;
-        this._dataServices[name] = new ButtressDataService(name, isCore, this._settings, this._store, this._schema[name]);
+        const isCore = (coreSchema && coreSchema.length > 0) ? coreSchema.some((s) => name.includes(Sugar.String.camelize(s, false)) ) : false;
+        this._dataServices[endpointName] = new ButtressDataService(endpointName, isCore, this._settings, this._store, this._schema[name]);
         if (this._settings.logLevel) {
-          this._dataServices[name].setLogLevel(this._settings.logLevel);
+          this._dataServices[endpointName].setLogLevel(this._settings.logLevel);
         }
       }
     });
@@ -302,12 +304,36 @@ export class ButtressDbService extends LtnService {
     return this._dataServices[ds]
   }
 
+  getEndpoint() {
+    return this._settings.endpoint;
+  }
+
+  getUserId() {
+    return this._settings.userId;
+  }
+
+  getToken() {
+    return this._settings.token;
+  }
+
+  getCoreSchemas() {
+    return this._settings.coreSchema;
+  }
+
+  setEndpoint(endpoint: string) {
+    this._settings.endpoint = endpoint;
+  }
+
   setUserId(userId: string) {
     this._settings.userId = userId;
   }
 
   setToken(token: string) {
     this._settings.token = token;
+  }
+
+  setCoreSchemas(coreSchema: Array<string>) {
+    this._settings.coreSchema = coreSchema;
   }
 
   updated(changedProperties: Map<string, unknown>) {
@@ -340,6 +366,16 @@ export class ButtressDbService extends LtnService {
       // Trigger reconnection?
       // this.connect();
     }
+  }
+
+  _singularise(word: string) {
+    const lastLetter = word.slice(-1);
+    let output = word;
+    if (lastLetter === 's') {
+      output = word.substring(0 , word.length - 1);
+    }
+
+    return output;
   }
 
   render() {
