@@ -30,6 +30,10 @@ export interface NotifyChangeOpts {
   readonly?: boolean,
   silent?: boolean,
   splice?: boolean,
+  promise?: {
+    resolve: Function,
+    reject: Function,
+  },
 }
 
 export interface IndexSplice {
@@ -82,13 +86,13 @@ export class ButtressStore implements ButtressStoreInterface {
     this.__logger.level = level;
   }
 
-  create(schema: string, value: ButtressEntity) {
+  create(schema: string, value: ButtressEntity, opts?: NotifyChangeOpts) {
     if (!value.id) throw new Error('Unable to create object without providing an ID');
 
-    return this.set(`${schema}.${value.id}`, value);
+    return this.set(`${schema}.${value.id}`, value, opts);
   }
 
-  delete(path: string) {
+  delete(path: string, opts?: NotifyChangeOpts) {
     const parts = path.toString().split('.');
     const id = parts.pop();
     const prePath = parts.join('.');

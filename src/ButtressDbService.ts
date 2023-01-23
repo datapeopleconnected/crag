@@ -62,11 +62,11 @@ export class ButtressDbService extends LtnService {
     // Route through the dataservices
     // const self = this;
     this._dsStoreInterface = {
-      create: (service: string, value: ButtressEntity): string|undefined => this._getDataService(service).create(value),
-      delete: (service: string, id: string): boolean => this._getDataService(service).delete(id),
+      create: (service: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined => this._getDataService(service).create(value, opts),
+      delete: (service: string, id: string, opts?: NotifyChangeOpts): boolean => this._getDataService(service).delete(id, opts),
 
-      get: (path: string): any => this._getDataService(path).get(path),
-      set: (path: string, value: any): string|undefined => this._getDataService(path).set(path, value),
+      get: (path: string, opts?: NotifyChangeOpts): any => this._getDataService(path).get(path, opts),
+      set: (path: string, value: any, opts?: NotifyChangeOpts): string|undefined => this._getDataService(path).set(path, value, opts),
       push: (path: string, ...items: any[]): number => this._getDataService(path).push(path, ...items),
       pushExt: (path: string, opts?: NotifyChangeOpts, ...items: any[]): number => this._getDataService(path).pushExt(path, opts, ...items),
       splice: (path: string, start: number, deleteCount?: number, ...items: any[]): any[] =>
@@ -225,12 +225,12 @@ export class ButtressDbService extends LtnService {
     dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
   }
 
-  create(path: string, value: ButtressEntity): string|undefined {
+  create(path: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
     const parts = path.toString().split('.');
     if (parts.length > 1) throw new Error('Create is only avaible for top level entities');
     const [schema] = parts;
 
-    return this._dsStoreInterface.create(schema, value);
+    return this._dsStoreInterface.create(schema, value, opts);
   }
 
   delete(path: string): boolean {

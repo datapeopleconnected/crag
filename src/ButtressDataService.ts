@@ -69,7 +69,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._logger.level = level;
   }
 
-  create(value: ButtressEntity): string|undefined {
+  create(value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
     const val = value;
 
     // Generate ID if not provided
@@ -80,20 +80,20 @@ export default class ButtressDataService implements ButtressStoreInterface {
       throw new Error('Unable to create entity with duplicate id');
     }
 
-    return this._store.create(this.name, value);
+    return this._store.create(this.name, value, opts);
   }
 
-  delete(id: string) {
-    return this._store.delete(`${this.name}.${id}`);
+  delete(id: string, opts?: NotifyChangeOpts) {
+    return this._store.delete(`${this.name}.${id}`, opts);
   }
 
   // Data accessors
-  get(path: string): any {
+  get(path: string, opts?: NotifyChangeOpts): any {
     return this._store.get(path);
   }
 
-  set(path: string, value: any): string|undefined {
-    return this._store.set(path, value);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+    return this._store.set(path, value, opts);
   }
 
   push(path: string, ...items: any[]): number {
@@ -221,7 +221,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
       if (isAddition) {
         // Addition to a base object
-        this.__generateAddRequest(item);
+        this.__generateAddRequest(item)
+          .then(() => {
+            if (cr.opts.promise) {
+              cr.opts.promise.resolve();
+            }
+          }).catch((err) => {
+            if (cr.opts.promise) {
+              cr.opts.promise.reject(err);
+            }
+          });
         return;
       }
 
