@@ -166,7 +166,8 @@ export class ButtressDbService extends LtnService {
     if (response.ok) {
       const body = await response.json();
       this._schema = body.reduce((obj: {[key: string]: ButtressSchema}, schema: ButtressSchema) => {
-        obj[schema.name] = schema; // eslint-disable-line no-param-reassign
+        const schemaName = this._singularise(schema.name);
+        obj[schemaName] = schema; // eslint-disable-line no-param-reassign
         return obj;
       }, {});
       this._debug(body);
@@ -233,12 +234,12 @@ export class ButtressDbService extends LtnService {
     return this._dsStoreInterface.create(schema, value, opts);
   }
 
-  delete(path: string): boolean {
+  delete(path: string, opts?: NotifyChangeOpts): boolean {
     const parts = path.toString().split('.');
     if (parts.length > 2) throw new Error('Delete is only avaible for top level entities');
     const [schema, id] = parts;
 
-    return this._dsStoreInterface.delete(schema, id);
+    return this._dsStoreInterface.delete(schema, id, opts);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -247,8 +248,8 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  set(path: string, value: any): string|undefined {
-    return this._dsStoreInterface.set(path, value);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+    return this._dsStoreInterface.set(path, value, opts);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -287,9 +288,18 @@ export class ButtressDbService extends LtnService {
 
   createObject(path: string) : any {
     const schema = this.getSchema(path.split('.').shift());
-    if (typeof schema === 'boolean') throw new Error(`Unable to find schmea for path ${path}`);
+    if (typeof schema === 'boolean') throw new Error(`Unable to find schema for path ${path}`);
     
     return ButtressSchemaFactory.create(schema, path);
+  }
+
+  async getById(dataService: string, entityId: string) {
+    if (!entityId) throw new Error('Unable to get property without an id');
+
+    const ds = this._dataServices[dataService];
+    if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
+
+    return ds.getById(entityId);
   }
 
   async query(dataService: string, buttressQuery: any, opts?: QueryOpts) {
@@ -368,6 +378,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
+    // eslint-disable-next-line class-methods-use-this
   _singularise(word: string) {
     const lastLetter = word.slice(-1);
     let output = word;
@@ -376,6 +387,59 @@ export class ButtressDbService extends LtnService {
     }
 
     return output;
+  }
+
+  async addLambda(lambda: ButtressEntity, auth: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalue Buttress endpoint or a token');
+      }
+      const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          lambda,
+          auth,
+        }),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`lambda.${outcome.id}`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async addSchema(appId: string, schema: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalue Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(schema),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`app.${appId}.__schema`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
   }
 
   render() {

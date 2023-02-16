@@ -62,7 +62,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this._store.set(this.name, new Map());
 
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any, skip: boolean = false) => this._processDataChange(cr, skip));
   }
 
   setLogLevel(level: LtnLogLevel) {
@@ -115,7 +115,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _processDataChange(cr: any) : void {
+  _processDataChange(cr: any, skip: boolean) : void {
+    if (skip) return;
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -151,7 +152,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
           i.removed.forEach((r: any) => {
             this._logger.debug(`this.__generateRmRequest(${r.id});`);
-            this.__generateRmRequest(r.id);
+            this.__generateRmRequest(r.id)
+              .then(() => {
+                if (cr?.opts?.promise) {
+                  cr.opts.promise.resolve();
+                }
+              }).catch((err) => {
+                if (cr?.opts?.promise) {
+                  cr.opts.promise.reject(err);
+                }
+              });
           });
         });
       } else {
@@ -223,11 +233,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
         // Addition to a base object
         this.__generateAddRequest(item)
           .then(() => {
-            if (cr.opts.promise) {
+            if (cr?.opts?.promise) {
               cr.opts.promise.resolve();
             }
           }).catch((err) => {
-            if (cr.opts.promise) {
+            if (cr?.opts?.promise) {
               cr.opts.promise.reject(err);
             }
           });
@@ -241,6 +251,19 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   updateSchema(schema: ButtressSchema) {
     this._schema = schema;
+  }
+
+  async getById(id: string) {
+    const storeEntity = this.get(`${this.name}.${id}`);
+    if (storeEntity) return storeEntity;
+    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
+
+    const entity = await this.__generateGetByIdRequest(id);
+    this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
+      silent: true
+    });
+
+    return entity;
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
@@ -449,13 +472,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
   //   });
   // }
 
-  // _generateGetRequest(entityId: string): Promise<void> {
-  //   return this.__queueRequest({
-  //     type: 'get',
-  //     url: this.getUrl(entityId),
-  //     method: 'GET',
-  //   });
-  // }
+  private __generateGetByIdRequest(entityId: string): Promise<ButtressEntity> {
+    return this.__queueRequest({
+      type: 'get',
+      url: this.getUrl(entityId),
+      method: 'GET',
+    });
+  }
 
   private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: string, project: any): Promise<ButtressEntity[]> {
     return this.__queueRequest({
@@ -585,7 +608,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
       })
 
       if (!response.ok) {
-        throw new Error(`DS ERROR [${request.type}] ${response.status} ${request.url} - ${response.statusText}`);
+        const responseData = await response.json();
+        const message = (responseData) ? responseData.message : '';
+        throw new Error(`DS ERROR [${request.type}] ${message} - ${response.status} ${request.url} - ${response.statusText}`);
       }
 
       this.status = 'done';
