@@ -309,6 +309,13 @@ export class ButtressDbService extends LtnService {
     return ds.query(buttressQuery, opts);
   }
 
+  async count(dataService: string, buttressQuery: any) {
+    const ds = this._dataServices[dataService];
+    if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
+
+    return ds.count(buttressQuery);
+  }
+
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {
     const [ds] = path.toString().split('.');
     return this._dataServices[ds]
@@ -395,7 +402,7 @@ export class ButtressDbService extends LtnService {
 
     try {
       if (!endpoint || !token) {
-        throw new Error('Invalue Buttress endpoint or a token');
+        throw new Error('Invalid Buttress endpoint or a token');
       }
       const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}`, {
         method: 'POST',
@@ -416,6 +423,33 @@ export class ButtressDbService extends LtnService {
     }
   }
 
+  async addDataSharing(appDataSharing: ButtressEntity) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/appDataSharing?urq=${Date.now()}&token=${token}`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(appDataSharing),
+      });
+
+      const outcome = await res.json();
+      await this._store.set(`appDataSharing.${outcome.id}`, outcome, opts, true);
+
+      return outcome.remoteAppToken;
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
   // eslint-disable-next-line class-methods-use-this
   async addSchema(appId: string, schema: any) {
     const {endpoint, token} = this._settings;
@@ -423,7 +457,7 @@ export class ButtressDbService extends LtnService {
 
     try {
       if (!endpoint || !token) {
-        throw new Error('Invalue Buttress endpoint or a token');
+        throw new Error('Invalid Buttress endpoint or a token');
       }
 
       const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}`, {
@@ -437,6 +471,58 @@ export class ButtressDbService extends LtnService {
 
       const outcome = await res.json();
       return this._store.set(`app.${appId}.__schema`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  async updateAppPolicySelectors(appId: string, policySelectorsList: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/app/policyPropertyList?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(policySelectorsList),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`app.${appId}.policyPropertiesList`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  async activateDataSharing(dataSharingId: string, remoteToken: string) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{
+          path: 'active',
+          value: true,
+        }]),
+      });
+
+      return this._store.set(`appDataSharing.${dataSharingId}.active`, true, opts, true);
     } catch(err: any) {
       throw new Error(err);
     }
