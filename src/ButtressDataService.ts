@@ -49,8 +49,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   bundlingChunk: number = 100;
 
-  constructor(name: string, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
+  constructor(name: string, core: boolean, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
     this.name = name;
+    this.core = core;
     this._settings = settings;
 
     this._logger = new LtnLogger(`buttress-data-service-${name}`);
@@ -61,14 +62,14 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this._store.set(this.name, new Map());
 
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any, skip: boolean = false) => this._processDataChange(cr, skip));
   }
 
   setLogLevel(level: LtnLogLevel) {
     this._logger.level = level;
   }
 
-  create(value: ButtressEntity): string|undefined {
+  create(value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
     const val = value;
 
     // Generate ID if not provided
@@ -79,20 +80,20 @@ export default class ButtressDataService implements ButtressStoreInterface {
       throw new Error('Unable to create entity with duplicate id');
     }
 
-    return this._store.create(this.name, value);
+    return this._store.create(this.name, value, opts);
   }
 
-  delete(id: string) {
-    return this._store.delete(`${this.name}.${id}`);
+  delete(id: string, opts?: NotifyChangeOpts) {
+    return this._store.delete(`${this.name}.${id}`, opts);
   }
 
   // Data accessors
-  get(path: string): any {
+  get(path: string, opts?: NotifyChangeOpts): any {
     return this._store.get(path);
   }
 
-  set(path: string, value: any): string|undefined {
-    return this._store.set(path, value);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+    return this._store.set(path, value, opts);
   }
 
   push(path: string, ...items: any[]): number {
@@ -114,7 +115,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _processDataChange(cr: any) : void {
+  _processDataChange(cr: any, skip: boolean) : void {
+    if (skip) return;
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -150,7 +152,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
           i.removed.forEach((r: any) => {
             this._logger.debug(`this.__generateRmRequest(${r.id});`);
-            this.__generateRmRequest(r.id);
+            this.__generateRmRequest(r.id)
+              .then(() => {
+                if (cr?.opts?.promise) {
+                  cr.opts.promise.resolve();
+                }
+              }).catch((err) => {
+                if (cr?.opts?.promise) {
+                  cr.opts.promise.reject(err);
+                }
+              });
           });
         });
       } else {
@@ -220,17 +231,48 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
       if (isAddition) {
         // Addition to a base object
-        this.__generateAddRequest(item);
+        this.__generateAddRequest(item)
+          .then(() => {
+            if (cr?.opts?.promise) {
+              cr.opts.promise.resolve();
+            }
+          }).catch((err) => {
+            if (cr?.opts?.promise) {
+              cr.opts.promise.reject(err);
+            }
+          });
         return;
       }
 
-      this.__generateUpdateRequest(item.id, path.join('.'), cr.value);
+      this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
+        .then(() => {
+          if (cr?.opts?.promise) {
+            cr.opts.promise.resolve();
+          }
+        }).catch((err) => {
+          if (cr?.opts?.promise) {
+            cr.opts.promise.reject(err);
+          }
+        });
     }
 
   }
 
   updateSchema(schema: ButtressSchema) {
     this._schema = schema;
+  }
+
+  async getById(id: string) {
+    const storeEntity = this.get(`${this.name}.${id}`);
+    if (storeEntity) return storeEntity;
+    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
+
+    const entity = await this.__generateGetByIdRequest(id);
+    this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
+      silent: true
+    });
+
+    return entity;
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
@@ -439,13 +481,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
   //   });
   // }
 
-  // _generateGetRequest(entityId: string): Promise<void> {
-  //   return this.__queueRequest({
-  //     type: 'get',
-  //     url: this.getUrl(entityId),
-  //     method: 'GET',
-  //   });
-  // }
+  private __generateGetByIdRequest(entityId: string): Promise<ButtressEntity> {
+    return this.__queueRequest({
+      type: 'get',
+      url: this.getUrl(entityId),
+      method: 'GET',
+    });
+  }
 
   private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: string, project: any): Promise<ButtressEntity[]> {
     return this.__queueRequest({
@@ -575,7 +617,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
       })
 
       if (!response.ok) {
-        throw new Error(`DS ERROR [${request.type}] ${response.status} ${request.url} - ${response.statusText}`);
+        const responseData = await response.json();
+        const message = (responseData) ? responseData.message : '';
+        throw new Error(`DS ERROR [${request.type}] ${message} - ${response.status} ${request.url} - ${response.statusText}`);
       }
 
       this.status = 'done';
@@ -597,6 +641,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
       return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.name}/${parts.join('/')}`;
     }
 
-    return `${this._settings.endpoint}/${this._settings.apiPath}/${this.name}/${parts.join('/')}`;
+    return `${this._settings.endpoint}/api/v1/${this.name}/${parts.join('/')}`;
   }
 }
