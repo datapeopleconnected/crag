@@ -30,6 +30,10 @@ export interface NotifyChangeOpts {
   readonly?: boolean,
   silent?: boolean,
   splice?: boolean,
+  promise?: {
+    resolve: Function,
+    reject: Function,
+  },
 }
 
 export interface IndexSplice {
@@ -82,13 +86,13 @@ export class ButtressStore implements ButtressStoreInterface {
     this.__logger.level = level;
   }
 
-  create(schema: string, value: ButtressEntity) {
+  create(schema: string, value: ButtressEntity, opts?: NotifyChangeOpts) {
     if (!value.id) throw new Error('Unable to create object without providing an ID');
 
-    return this.set(`${schema}.${value.id}`, value);
+    return this.set(`${schema}.${value.id}`, value, opts);
   }
 
-  delete(path: string) {
+  delete(path: string, opts?: NotifyChangeOpts) {
     const parts = path.toString().split('.');
     const id = parts.pop();
     const prePath = parts.join('.');
@@ -105,7 +109,7 @@ export class ButtressStore implements ButtressStoreInterface {
       removed: [prop],
       object: parent,
       type: 'splice',
-    }] });
+    }] }, opts);
 
     const change = (isMap) ? parent.delete(id) : delete parent[id];
     if (change) this.__invalidateData();
@@ -130,10 +134,10 @@ export class ButtressStore implements ButtressStoreInterface {
     return prop;
   }
 
-  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+  set(path: string, value: any, opts?: NotifyChangeOpts, skip: boolean = false): string|undefined {
     const change = opts?.silent || this.__notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
-    if (change) this.__invalidateData();
+    if (change) this.__invalidateData(skip);
     return setPath;
   }
 
@@ -292,7 +296,7 @@ export class ButtressStore implements ButtressStoreInterface {
     return changed;
   }
 
-  private __invalidateData() {
+  private __invalidateData(skip: boolean = false) {
     this.__logger.debug(`__invalidateData __dataInvalid:${this.__dataInvalid}`);
     if (!this.__dataInvalid) {
       this.__dataInvalid = true;
@@ -300,24 +304,24 @@ export class ButtressStore implements ButtressStoreInterface {
         // Bundle up changes
         if (this.__dataInvalid) {
           this.__dataInvalid = false;
-          this.__flushProperties();
+          this.__flushProperties(skip);
         }
       });
     }
   }
 
-  private __flushProperties() {
+  private __flushProperties(skip: boolean) {
     const changedProps = this.__dataPending;
     this.__logger.debug(`__flushProperties __dataPending:`, this.__dataPending);
     if (changedProps !== null) {
       this.__dataPending = null;
       this.__dataOld = null;
-      this.__propertiesChanged(changedProps);
+      this.__propertiesChanged(changedProps, skip);
     }
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private __propertiesChanged(changedProps: MapAny) {
+  private __propertiesChanged(changedProps: MapAny, skip: boolean = false) {
     let ran = false;
 
     this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
@@ -342,7 +346,7 @@ export class ButtressStore implements ButtressStoreInterface {
             if (Array.isArray(changedProps[prop])) {
               changedProps[prop].forEach((p: any) => fx.cb(...this.__marshalArgs(fx.info.args, prop, p)));
             } else {
-              fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]));
+              fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]), skip);
             }
 
             ran = true;

@@ -1,3 +1,4 @@
+import Sugar from 'sugar';
 import { html, css } from 'lit';
 import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
@@ -34,6 +35,9 @@ export class ButtressDbService extends LtnService {
   @property({type: String})
   userId?: string;
 
+  @property({type: Array, attribute: 'core-schema'})
+  coreSchema?: Array<string>;
+
   private _store: ButtressStore;
 
   private _realtime: ButtressRealtime;
@@ -58,11 +62,11 @@ export class ButtressDbService extends LtnService {
     // Route through the dataservices
     // const self = this;
     this._dsStoreInterface = {
-      create: (service: string, value: ButtressEntity): string|undefined => this._getDataService(service).create(value),
-      delete: (service: string, id: string): boolean => this._getDataService(service).delete(id),
+      create: (service: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined => this._getDataService(service).create(value, opts),
+      delete: (service: string, id: string, opts?: NotifyChangeOpts): boolean => this._getDataService(service).delete(id, opts),
 
-      get: (path: string): any => this._getDataService(path).get(path),
-      set: (path: string, value: any): string|undefined => this._getDataService(path).set(path, value),
+      get: (path: string, opts?: NotifyChangeOpts): any => this._getDataService(path).get(path, opts),
+      set: (path: string, value: any, opts?: NotifyChangeOpts): string|undefined => this._getDataService(path).set(path, value, opts),
       push: (path: string, ...items: any[]): number => this._getDataService(path).push(path, ...items),
       pushExt: (path: string, opts?: NotifyChangeOpts, ...items: any[]): number => this._getDataService(path).pushExt(path, opts, ...items),
       splice: (path: string, start: number, deleteCount?: number, ...items: any[]): any[] =>
@@ -85,6 +89,7 @@ export class ButtressDbService extends LtnService {
     this._settings.token = this.token;
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
+    this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
   }
 
   disconnectedCallback() {
@@ -141,7 +146,12 @@ export class ButtressDbService extends LtnService {
     if (!this._settings) return;
 
     // eslint-disable-next-line no-undef
-    const req: RequestInfo = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
+    let url = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
+    if (this._settings.coreSchema) {
+      url += `&core=${this._settings.coreSchema}`;
+    }
+
+    const req = url;
 
     // eslint-disable-next-line no-undef
     const init: RequestInit = {
@@ -156,7 +166,8 @@ export class ButtressDbService extends LtnService {
     if (response.ok) {
       const body = await response.json();
       this._schema = body.reduce((obj: {[key: string]: ButtressSchema}, schema: ButtressSchema) => {
-        obj[schema.name] = schema; // eslint-disable-line no-param-reassign
+        const schemaName = this._singularise(schema.name);
+        obj[schemaName] = schema; // eslint-disable-line no-param-reassign
         return obj;
       }, {});
       this._debug(body);
@@ -174,15 +185,18 @@ export class ButtressDbService extends LtnService {
     const dataServices: string[] = Object.keys(this._dataServices || []);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
-
+    const coreSchema = this._settings?.coreSchema;
     schemas.forEach((name) => {
       if (!this._schema) return;
-      if (dataServices.includes(name)) {
-        this._dataServices[name].updateSchema(this._schema[name]);
+      // TODO change apps and users api to app and user to be consistent with the endpoints
+      const endpointName = this._singularise(name);
+      if (dataServices.includes(endpointName)) {
+        this._dataServices[endpointName].updateSchema(this._schema[name]);
       } else {
-        this._dataServices[name] = new ButtressDataService(name, this._settings, this._store, this._schema[name]);
+        const isCore = (coreSchema && coreSchema.length > 0) ? coreSchema.some((s) => name.includes(Sugar.String.camelize(s, false)) ) : false;
+        this._dataServices[endpointName] = new ButtressDataService(endpointName, isCore, this._settings, this._store, this._schema[name]);
         if (this._settings.logLevel) {
-          this._dataServices[name].setLogLevel(this._settings.logLevel);
+          this._dataServices[endpointName].setLogLevel(this._settings.logLevel);
         }
       }
     });
@@ -212,20 +226,20 @@ export class ButtressDbService extends LtnService {
     dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
   }
 
-  create(path: string, value: ButtressEntity): string|undefined {
+  create(path: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
     const parts = path.toString().split('.');
     if (parts.length > 1) throw new Error('Create is only avaible for top level entities');
     const [schema] = parts;
 
-    return this._dsStoreInterface.create(schema, value);
+    return this._dsStoreInterface.create(schema, value, opts);
   }
 
-  delete(path: string): boolean {
+  delete(path: string, opts?: NotifyChangeOpts): boolean {
     const parts = path.toString().split('.');
     if (parts.length > 2) throw new Error('Delete is only avaible for top level entities');
     const [schema, id] = parts;
 
-    return this._dsStoreInterface.delete(schema, id);
+    return this._dsStoreInterface.delete(schema, id, opts);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -234,8 +248,8 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  set(path: string, value: any): string|undefined {
-    return this._dsStoreInterface.set(path, value);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+    return this._dsStoreInterface.set(path, value, opts);
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -274,9 +288,18 @@ export class ButtressDbService extends LtnService {
 
   createObject(path: string) : any {
     const schema = this.getSchema(path.split('.').shift());
-    if (typeof schema === 'boolean') throw new Error(`Unable to find schmea for path ${path}`);
+    if (typeof schema === 'boolean') throw new Error(`Unable to find schema for path ${path}`);
     
     return ButtressSchemaFactory.create(schema, path);
+  }
+
+  async getById(dataService: string, entityId: string) {
+    if (!entityId) throw new Error('Unable to get property without an id');
+
+    const ds = this._dataServices[dataService];
+    if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
+
+    return ds.getById(entityId);
   }
 
   async query(dataService: string, buttressQuery: any, opts?: QueryOpts) {
@@ -286,9 +309,36 @@ export class ButtressDbService extends LtnService {
     return ds.query(buttressQuery, opts);
   }
 
+  async count(dataService: string, buttressQuery: any) {
+    const ds = this._dataServices[dataService];
+    if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
+
+    return ds.count(buttressQuery);
+  }
+
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {
     const [ds] = path.toString().split('.');
     return this._dataServices[ds]
+  }
+
+  getEndpoint() {
+    return this._settings.endpoint;
+  }
+
+  getUserId() {
+    return this._settings.userId;
+  }
+
+  getToken() {
+    return this._settings.token;
+  }
+
+  getCoreSchemas() {
+    return this._settings.coreSchema;
+  }
+
+  setEndpoint(endpoint: string) {
+    this._settings.endpoint = endpoint;
   }
 
   setUserId(userId: string) {
@@ -297,6 +347,10 @@ export class ButtressDbService extends LtnService {
 
   setToken(token: string) {
     this._settings.token = token;
+  }
+
+  setCoreSchemas(coreSchema: Array<string>) {
+    this._settings.coreSchema = coreSchema;
   }
 
   updated(changedProperties: Map<string, unknown>) {
@@ -318,12 +372,159 @@ export class ButtressDbService extends LtnService {
         this._settings.userId = this.userId;
         update = true;
       }
+      else if (propName === 'coreSchema') {
+        this._settings.coreSchema = this.coreSchema;
+        update = true;
+      }
     });
 
     if (update) {
       this.requestUpdate();
       // Trigger reconnection?
       // this.connect();
+    }
+  }
+
+    // eslint-disable-next-line class-methods-use-this
+  _singularise(word: string) {
+    const lastLetter = word.slice(-1);
+    let output = word;
+    if (lastLetter === 's') {
+      output = word.substring(0 , word.length - 1);
+    }
+
+    return output;
+  }
+
+  async addLambda(lambda: ButtressEntity, auth: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+      const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          lambda,
+          auth,
+        }),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`lambda.${outcome.id}`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  async addDataSharing(appDataSharing: ButtressEntity) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/appDataSharing?urq=${Date.now()}&token=${token}`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(appDataSharing),
+      });
+
+      const outcome = await res.json();
+      await this._store.set(`appDataSharing.${outcome.id}`, outcome, opts, true);
+
+      return outcome.remoteAppToken;
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async addSchema(appId: string, schema: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(schema),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`app.${appId}.__schema`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  async updateAppPolicySelectors(appId: string, policySelectorsList: any) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      const res = await fetch(`${endpoint}/api/v1/app/policyPropertyList?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(policySelectorsList),
+      });
+
+      const outcome = await res.json();
+      return this._store.set(`app.${appId}.policyPropertiesList`, outcome, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
+    }
+  }
+
+  async activateDataSharing(dataSharingId: string, remoteToken: string) {
+    const {endpoint, token} = this._settings;
+    const opts = {} as NotifyChangeOpts;
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+
+      await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{
+          path: 'active',
+          value: true,
+        }]),
+      });
+
+      return this._store.set(`appDataSharing.${dataSharingId}.active`, true, opts, true);
+    } catch(err: any) {
+      throw new Error(err);
     }
   }
 
