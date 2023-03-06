@@ -244,7 +244,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
         return;
       }
 
-      this.__generateUpdateRequest(item.id, path.join('.'), cr.value);
+      this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
+        .then(() => {
+          if (cr?.opts?.promise) {
+            cr.opts.promise.resolve();
+          }
+        }).catch((err) => {
+          if (cr?.opts?.promise) {
+            cr.opts.promise.reject(err);
+          }
+        });
     }
 
   }
