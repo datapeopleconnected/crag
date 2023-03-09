@@ -62,7 +62,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this._store.set(this.name, new Map());
 
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any, skip: boolean = false) => this._processDataChange(cr, skip));
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any) => this._processDataChange(cr));
   }
 
   setLogLevel(level: LtnLogLevel) {
@@ -88,7 +88,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // Data accessors
-  get(path: string, opts?: NotifyChangeOpts): any {
+  get(path: string): any {
     return this._store.get(path);
   }
 
@@ -115,8 +115,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _processDataChange(cr: any, skip: boolean) : void {
-    if (skip) return;
+  _processDataChange(cr: any) : void {
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -154,12 +153,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
             this._logger.debug(`this.__generateRmRequest(${r.id});`);
             this.__generateRmRequest(r.id)
               .then(() => {
-                if (cr?.opts?.promise) {
-                  cr.opts.promise.resolve();
+                if (cr?.opts?.dboComplete) {
+                  cr.opts.dboComplete.resolve();
                 }
               }).catch((err) => {
-                if (cr?.opts?.promise) {
-                  cr.opts.promise.reject(err);
+                if (cr?.opts?.dboComplete) {
+                  cr.opts.dboComplete.reject(err);
                 }
               });
           });
@@ -233,12 +232,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
         // Addition to a base object
         this.__generateAddRequest(item)
           .then(() => {
-            if (cr?.opts?.promise) {
-              cr.opts.promise.resolve();
+            if (cr?.opts?.dboComplete) {
+              cr.opts.dboComplete.resolve();
             }
           }).catch((err) => {
-            if (cr?.opts?.promise) {
-              cr.opts.promise.reject(err);
+            if (cr?.opts?.dboComplete) {
+              cr.opts.dboComplete.reject(err);
             }
           });
         return;
@@ -246,12 +245,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
       this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
         .then(() => {
-          if (cr?.opts?.promise) {
-            cr.opts.promise.resolve();
+          if (cr?.opts?.dboComplete) {
+            cr.opts.dboComplete.resolve();
           }
         }).catch((err) => {
-          if (cr?.opts?.promise) {
-            cr.opts.promise.reject(err);
+          if (cr?.opts?.dboComplete) {
+            cr.opts.dboComplete.reject(err);
           }
         });
     }

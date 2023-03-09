@@ -65,7 +65,7 @@ export class ButtressDbService extends LtnService {
       create: (service: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined => this._getDataService(service).create(value, opts),
       delete: (service: string, id: string, opts?: NotifyChangeOpts): boolean => this._getDataService(service).delete(id, opts),
 
-      get: (path: string, opts?: NotifyChangeOpts): any => this._getDataService(path).get(path, opts),
+      get: (path: string): any => this._getDataService(path).get(path),
       set: (path: string, value: any, opts?: NotifyChangeOpts): string|undefined => this._getDataService(path).set(path, value, opts),
       push: (path: string, ...items: any[]): number => this._getDataService(path).push(path, ...items),
       pushExt: (path: string, opts?: NotifyChangeOpts, ...items: any[]): number => this._getDataService(path).pushExt(path, opts, ...items),
@@ -398,7 +398,9 @@ export class ButtressDbService extends LtnService {
 
   async addLambda(lambda: ButtressEntity, auth: any) {
     const {endpoint, token} = this._settings;
-    const opts = {} as NotifyChangeOpts;
+    const opts = {
+      silent: true,
+    }
 
     try {
       if (!endpoint || !token) {
@@ -417,7 +419,7 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`lambda.${outcome.id}`, outcome, opts, true);
+      return this._store.set(`lambda.${outcome.id}`, outcome, opts);
     } catch(err: any) {
       throw new Error(err);
     }
@@ -425,7 +427,9 @@ export class ButtressDbService extends LtnService {
 
   async addDataSharing(appDataSharing: ButtressEntity) {
     const {endpoint, token} = this._settings;
-    const opts = {} as NotifyChangeOpts;
+    const opts = {
+      silent: true,
+    }
 
     try {
       if (!endpoint || !token) {
@@ -442,7 +446,7 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      await this._store.set(`appDataSharing.${outcome.id}`, outcome, opts, true);
+      await this._store.set(`appDataSharing.${outcome.id}`, outcome, opts);
 
       return outcome.remoteAppToken;
     } catch(err: any) {
@@ -453,7 +457,9 @@ export class ButtressDbService extends LtnService {
   // eslint-disable-next-line class-methods-use-this
   async addSchema(appId: string, schema: any) {
     const {endpoint, token} = this._settings;
-    const opts = {} as NotifyChangeOpts;
+    const opts = {
+      silent: true,
+    }
 
     try {
       if (!endpoint || !token) {
@@ -470,7 +476,7 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`app.${appId}.__schema`, outcome, opts, true);
+      return this._store.set(`app.${appId}.__schema`, outcome, opts);
     } catch(err: any) {
       throw new Error(err);
     }
@@ -478,7 +484,9 @@ export class ButtressDbService extends LtnService {
 
   async updateAppPolicySelectors(appId: string, policySelectorsList: any) {
     const {endpoint, token} = this._settings;
-    const opts = {} as NotifyChangeOpts;
+    const opts = {
+      silent: true,
+    }
 
     try {
       if (!endpoint || !token) {
@@ -495,7 +503,7 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`app.${appId}.policyPropertiesList`, outcome, opts, true);
+      return this._store.set(`app.${appId}.policyPropertiesList`, outcome, opts);
     } catch(err: any) {
       throw new Error(err);
     }
@@ -503,7 +511,9 @@ export class ButtressDbService extends LtnService {
 
   async activateDataSharing(dataSharingId: string, remoteToken: string) {
     const {endpoint, token} = this._settings;
-    const opts = {} as NotifyChangeOpts;
+    const opts = {
+      silent: true,
+    }
 
     try {
       if (!endpoint || !token) {
@@ -522,7 +532,7 @@ export class ButtressDbService extends LtnService {
         }]),
       });
 
-      return this._store.set(`appDataSharing.${dataSharingId}.active`, true, opts, true);
+      return this._store.set(`appDataSharing.${dataSharingId}.active`, true, opts);
     } catch(err: any) {
       throw new Error(err);
     }
