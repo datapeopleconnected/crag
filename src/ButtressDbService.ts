@@ -396,7 +396,7 @@ export class ButtressDbService extends LtnService {
     return output;
   }
 
-  async addLambda(lambda: ButtressEntity, auth: any) {
+  async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {
     const {endpoint, token} = this._settings;
     const opts = {
       silent: true,
@@ -406,7 +406,7 @@ export class ButtressDbService extends LtnService {
       if (!endpoint || !token) {
         throw new Error('Invalid Buttress endpoint or a token');
       }
-      const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}`, {
+      const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'POST',
         cache: 'no-store',
         headers: {
@@ -425,7 +425,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async addDataSharing(appDataSharing: ButtressEntity) {
+  async addDataSharing(appDataSharing: ButtressEntity, apiPath: string) {
     const {endpoint, token} = this._settings;
     const opts = {
       silent: true,
@@ -436,7 +436,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/appDataSharing?urq=${Date.now()}&token=${token}`, {
+      const res = await fetch(`${endpoint}/api/v1/appDataSharing?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'POST',
         cache: 'no-store',
         headers: {
@@ -455,7 +455,7 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async addSchema(appId: string, schema: any) {
+  async addSchema(appId: string, apiPath: string, schema: any) {
     const {endpoint, token} = this._settings;
     const opts = {
       silent: true,
@@ -466,7 +466,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}`, {
+      const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'PUT',
         cache: 'no-store',
         headers: {
@@ -482,7 +482,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async updateAppPolicySelectors(appId: string, policySelectorsList: any) {
+  async updateAppPolicySelectors(appId: string, apiPath: string, policySelectorsList: any) {
     const {endpoint, token} = this._settings;
     const opts = {
       silent: true,
@@ -493,7 +493,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/app/policyPropertyList?urq=${Date.now()}&token=${token}`, {
+      const res = await fetch(`${endpoint}/api/v1/app/policyPropertyList?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'PUT',
         cache: 'no-store',
         headers: {
@@ -509,7 +509,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async activateDataSharing(dataSharingId: string, remoteToken: string) {
+  async activateDataSharing(dataSharingId: string, apiPath: string, remoteToken: string) {
     const {endpoint, token} = this._settings;
     const opts = {
       silent: true,
@@ -520,7 +520,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}`, {
+      await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'PUT',
         cache: 'no-store',
         headers: {
