@@ -349,6 +349,10 @@ export class ButtressDbService extends LtnService {
     this._settings.token = token;
   }
 
+  async setApiPath(apiPath: string) {
+    this._settings.apiPath = apiPath;
+  }
+
   setCoreSchemas(coreSchema: Array<string>) {
     this._settings.coreSchema = coreSchema;
   }
