@@ -137,7 +137,12 @@ export class ButtressStore implements ButtressStoreInterface {
   set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
     const change = opts?.silent || this.__notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
-    if (change) this.__invalidateData();
+    if (change) {
+      this.__invalidateData();
+    } else {
+      opts?.dboComplete?.resolve();
+    }
+
     return setPath;
   }
 
@@ -226,9 +231,10 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
+    const [options] = splices;
+    const change = options?.opts?.silent || this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
     this.__notifyPath(`${path}.length`, array.length);
-    this.__invalidateData();
+    if (change) this.__invalidateData();
   }
 
   private __setDataProperty(path: string, value: any): string|undefined {
