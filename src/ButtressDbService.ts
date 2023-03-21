@@ -429,6 +429,40 @@ export class ButtressDbService extends LtnService {
     }
   }
 
+  async deployLambda(lambda: ButtressEntity, apiPath: string) {
+    const {endpoint, token} = this._settings;
+    const opts = {
+      silent: true,
+    };
+
+    try {
+      if (!endpoint || !token) {
+        throw new Error('Invalid Buttress endpoint or a token');
+      }
+      const res = await fetch(`${endpoint}/api/v1/lambda/${lambda.id}/deployment?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
+        method: 'PUT',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          branch: lambda.git.branch,
+          hash: lambda.git.hash,
+        }),
+      });
+
+      const outcome = await res.json();
+      if (res.status !== 200) {
+        throw new Error(outcome.message);
+      }
+
+      if (!this._schema) return true;
+      return this._store.pushExt(`lambda.${lambda.id}.deployments`, this._schema.lambda, opts, outcome);
+    } catch (err: any) {
+      throw new Error(err);
+    }
+  }
+
   async addDataSharing(appDataSharing: ButtressEntity, apiPath: string) {
     const {endpoint, token} = this._settings;
     const opts = {
