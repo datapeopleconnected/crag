@@ -137,7 +137,12 @@ export class ButtressStore implements ButtressStoreInterface {
   set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
     const change = opts?.silent || this.__notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
-    if (change) this.__invalidateData();
+    if (change) {
+      this.__invalidateData();
+    } else {
+      opts?.dboComplete?.resolve();
+    }
+
     return setPath;
   }
 
