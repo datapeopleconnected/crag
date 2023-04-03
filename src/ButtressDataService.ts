@@ -153,11 +153,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
             this._logger.debug(`this.__generateRmRequest(${r.id});`);
             this.__generateRmRequest(r.id)
               .then(() => {
-                if (cr?.opts?.dboComplete) {
+                if (cr.opts?.dboComplete) {
                   cr.opts.dboComplete.resolve();
                 }
               }).catch((err) => {
-                if (cr?.opts?.dboComplete) {
+                if (cr.opts?.dboComplete) {
                   cr.opts.dboComplete.reject(err);
                 }
               });
@@ -186,11 +186,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
               this.__generateUpdateRequest(entity.id, path.join('.'), o)
                 .then(() => {
-                  if (cr?.opts?.dboComplete) {
+                  if (cr.opts?.dboComplete) {
                     cr.opts.dboComplete.resolve();
                   }
                 }).catch((err) => {
-                  if (cr?.opts?.dboComplete) {
+                  if (cr.opts?.dboComplete) {
                     cr.opts.dboComplete.reject(err);
                   }
                 });
@@ -205,11 +205,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
                 this.__generateUpdateRequest(entity.id, path.join('.'), '')
                   .then(() => {
-                    if (cr?.opts?.dboComplete) {
+                    if (cr.opts?.dboComplete) {
                       cr.opts.dboComplete.resolve();
                     }
                   }).catch((err) => {
-                    if (cr?.opts?.dboComplete) {
+                    if (cr.opts?.dboComplete) {
                       cr.opts.dboComplete.reject(err);
                     }
                   });

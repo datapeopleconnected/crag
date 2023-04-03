@@ -402,9 +402,6 @@ export class ButtressDbService extends LtnService {
 
   async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    }
 
     try {
       if (!endpoint || !token) {
@@ -423,7 +420,9 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`lambda.${outcome.id}`, outcome, opts);
+      if (res.status !== 200) throw new Error(outcome.message);
+
+      return true;
     } catch(err: any) {
       throw new Error(err);
     }
@@ -431,9 +430,6 @@ export class ButtressDbService extends LtnService {
 
   async deployLambda(lambda: ButtressEntity, apiPath: string) {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    };
 
     try {
       if (!endpoint || !token) {
@@ -452,22 +448,16 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      if (res.status !== 200) {
-        throw new Error(outcome.message);
-      }
+      if (res.status !== 200) throw new Error(outcome.message);
 
-      if (!this._schema) return true;
-      return this._store.pushExt(`lambda.${lambda.id}.deployments`, this._schema.lambda, opts, outcome);
+      return true;
     } catch (err: any) {
       throw new Error(err);
     }
   }
 
-  async addDataSharing(appDataSharing: ButtressEntity, apiPath: string) {
+  async addDataSharing(appDataSharing: ButtressEntity, apiPath: string): string {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    }
 
     try {
       if (!endpoint || !token) {
@@ -484,7 +474,7 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      await this._store.set(`appDataSharing.${outcome.id}`, outcome, opts);
+      if (res.status !== 200) throw new Error(outcome.message);
 
       return outcome.remoteAppToken;
     } catch(err: any) {
@@ -495,9 +485,6 @@ export class ButtressDbService extends LtnService {
   // eslint-disable-next-line class-methods-use-this
   async addSchema(appId: string, apiPath: string, schema: any) {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    }
 
     try {
       if (!endpoint || !token) {
@@ -514,7 +501,9 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`app.${appId}.__schema`, outcome, opts);
+      if (res.status !== 200) throw new Error(outcome.message);
+
+      return true;
     } catch(err: any) {
       throw new Error(err);
     }
@@ -522,9 +511,6 @@ export class ButtressDbService extends LtnService {
 
   async updateAppPolicySelectors(appId: string, apiPath: string, policySelectorsList: any) {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    }
 
     try {
       if (!endpoint || !token) {
@@ -541,7 +527,9 @@ export class ButtressDbService extends LtnService {
       });
 
       const outcome = await res.json();
-      return this._store.set(`app.${appId}.policyPropertiesList`, outcome, opts);
+      if (res.status !== 200) throw new Error(outcome.message);
+
+      return true;
     } catch(err: any) {
       throw new Error(err);
     }
@@ -549,16 +537,13 @@ export class ButtressDbService extends LtnService {
 
   async activateDataSharing(dataSharingId: string, apiPath: string, remoteToken: string) {
     const {endpoint, token} = this._settings;
-    const opts = {
-      silent: true,
-    }
 
     try {
       if (!endpoint || !token) {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
+      const res = await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'PUT',
         cache: 'no-store',
         headers: {
@@ -570,7 +555,10 @@ export class ButtressDbService extends LtnService {
         }]),
       });
 
-      return this._store.set(`appDataSharing.${dataSharingId}.active`, true, opts);
+      const outcome = await res.json();
+      if (res.status !== 200) throw new Error(outcome.message);
+
+      return true;
     } catch(err: any) {
       throw new Error(err);
     }

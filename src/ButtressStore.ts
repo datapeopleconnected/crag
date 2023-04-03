@@ -231,10 +231,9 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    const [options] = splices;
-    const change = options?.opts?.silent || this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
+    this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
     this.__notifyPath(`${path}.length`, array.length);
-    if (change) this.__invalidateData();
+    this.__invalidateData();
   }
 
   private __setDataProperty(path: string, value: any): string|undefined {

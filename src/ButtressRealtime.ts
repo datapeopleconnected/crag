@@ -72,6 +72,7 @@ export default class ButtressDataRealtime {
       });
       this._socket.on('connect', () => this._onConnected());
       this._socket.on('disconnect', () => this._onDisconnected());
+      this._configureRxEvents();
     } catch (err) {
       this._onDisconnected();
       this._logger.error(err);
