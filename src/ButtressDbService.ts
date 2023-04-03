@@ -456,7 +456,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async addDataSharing(appDataSharing: ButtressEntity, apiPath: string): string {
+  async addDataSharing(appDataSharing: ButtressEntity, apiPath: string) {
     const {endpoint, token} = this._settings;
 
     try {
@@ -483,7 +483,7 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  async addSchema(appId: string, apiPath: string, schema: any) {
+  async addSchema(apiPath: string, schema: any) {
     const {endpoint, token} = this._settings;
 
     try {
@@ -509,7 +509,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async updateAppPolicySelectors(appId: string, apiPath: string, policySelectorsList: any) {
+  async updateAppPolicySelectors(apiPath: string, policySelectorsList: any) {
     const {endpoint, token} = this._settings;
 
     try {
@@ -535,7 +535,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-  async activateDataSharing(dataSharingId: string, apiPath: string, remoteToken: string) {
+  async activateDataSharing(dataSharingId: string, apiPath: string, remoteToken: string): Promise<boolean> {
     const {endpoint, token} = this._settings;
 
     try {
@@ -543,16 +543,15 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/appDataSharing/activate/${remoteToken}?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
+      const res = await fetch(`${endpoint}/api/v1/appDataSharing/${dataSharingId}/token?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
         method: 'PUT',
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify([{
-          path: 'active',
-          value: true,
-        }]),
+        body: JSON.stringify({
+          token: remoteToken
+        }),
       });
 
       const outcome = await res.json();
