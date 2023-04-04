@@ -14,12 +14,6 @@ import {ButtressSchemaFactory} from './ButtressSchemaFactory.js';
 import { Settings } from './helpers.js';
 
 export class ButtressDbService extends LtnService {
-  static styles = css`
-    :host {
-      display: none;
-    }
-  `;
-
   // @property({ type: String, attribute: false }) endpoint = "hello";
   // private _endpoint: String = "hello";asd
 
