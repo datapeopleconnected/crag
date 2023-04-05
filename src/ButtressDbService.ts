@@ -385,13 +385,14 @@ export class ButtressDbService extends LtnService {
 
     // eslint-disable-next-line class-methods-use-this
   _singularise(word: string) {
-    const lastLetter = word.slice(-1);
-    let output = word;
-    if (lastLetter === 's') {
-      output = word.substring(0 , word.length - 1);
-    }
+    return word; // TUT FUCKING TUT
+    // const lastLetter = word.slice(-1);
+    // let output = word;
+    // if (lastLetter === 's') {
+    //   output = word.substring(0 , word.length - 1);
+    // }
 
-    return output;
+    // return output;
   }
 
   async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {
