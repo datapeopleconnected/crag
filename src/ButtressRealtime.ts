@@ -211,30 +211,28 @@ export default class ButtressDataRealtime {
   private _handleDelete(pathParts: PathParts, response:any, isBulk: boolean = false, clear: boolean = false) {
     this._logger.debug(`_handleDelete: start`);
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
-  
-    const data = this._store.get(pathParts.collectionName);
+
     if (clear || (!isBulk && !pathParts.id)) { // DeleteAll
-      this._store.spliceExt(pathParts.collectionName, 0, data.length, {
-        readonly: true
-      });
+      this._logger.warn(`Clearing store data hasn't been implemented yet`);
     } else if (isBulk) {
       // TODO: Need to get list of the ids that have been deleted from buttress
       for (let x = 0; x < responses.length; x += 1) {
-        const itemIndex = data.findIndex((d: any) => d.id === responses[x]);
-        if (itemIndex !== -1) {
-          this._store.spliceExt(pathParts.collectionName, itemIndex, 1, {
+        const entity = this._store.get(`${pathParts.collectionName}.${responses[x].id}`);
+        if (entity) {
+          this._store.delete(pathParts.collectionName, responses[x].id, {
             readonly: true
           });
         }
       };
     } else if (pathParts.id) { // DeleteSingle
-      const itemIndex = data.findIndex((d: any) => d.id === pathParts.id);
-      if (itemIndex !== -1) {
-        this._store.spliceExt(pathParts.collectionName, itemIndex, 1, {
+      const entity = this._store.get(`${pathParts.collectionName}.${pathParts.id}`);
+      if (entity) {
+        this._store.delete(pathParts.collectionName, pathParts.id, {
           readonly: true
         });
       }
     }
+
     this._logger.debug(`_handleDelete: end`);
   }
   
@@ -242,14 +240,13 @@ export default class ButtressDataRealtime {
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
     this._logger.debug(`_handlePost: start`, responses);
 
-    const data = this._store.get(pathParts.collectionName);
     for (let x = 0; x < responses.length; x += 1) {
-      const entityIdx = data.findIndex((e: any) => e.id === responses[x].id);
-      if (entityIdx !== -1) return;
+      const entity = this._store.get(`${pathParts.collectionName}.${responses[x].id}`);
+      if (entity) return; // Skip as it already exists
 
-      this._store.pushExt(pathParts.collectionName, {
+      this._store.set(`${pathParts.collectionName}.${responses[x].id}`, response, {
         readonly: true
-      }, response);
+      });
     }
   }
 
@@ -288,8 +285,8 @@ export default class ButtressDataRealtime {
     const data = this._store.get(collectionName);
     if (!data) return false;
 
-    const entityIdx = data.findIndex((e: any) => e.id === id);
-    if (entityIdx === -1) return false;
+    const entity = this._store.get(`${collectionName}.${id}`);
+    if (!entity) return false;
 
     let tail: string[] = [];
     if (path) {
@@ -300,7 +297,7 @@ export default class ButtressDataRealtime {
       }
     }
 
-    return [collectionName, entityIdx].concat(tail).join('.');
+    return [collectionName, id].concat(tail).join('.');
   }
 
 }

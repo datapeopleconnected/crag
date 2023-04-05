@@ -100,7 +100,7 @@ export class ButtressStore implements ButtressStoreInterface {
     if (!id) throw new Error('Unable to remove property');
 
     const parent = this.get(prePath);
-    const isMap = (parent instanceof Map); 
+    const isMap = (parent instanceof Map);
     const prop = (isMap) ? parent.get(id) : parent[id];
 
     this.__notifyPath(`${path}.splices`, { indexSplices: [{
