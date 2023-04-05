@@ -62,7 +62,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this._store.set(this.name, new Map());
 
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any, skip: boolean = false) => this._processDataChange(cr, skip));
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any) => this._processDataChange(cr));
   }
 
   setLogLevel(level: LtnLogLevel) {
@@ -88,7 +88,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // Data accessors
-  get(path: string, opts?: NotifyChangeOpts): any {
+  get(path: string): any {
     return this._store.get(path);
   }
 
@@ -115,8 +115,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  _processDataChange(cr: any, skip: boolean) : void {
-    if (skip) return;
+  _processDataChange(cr: any) : void {
     if (/\.length$/.test(cr.path) === true) {
       return;
     }
@@ -154,12 +153,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
             this._logger.debug(`this.__generateRmRequest(${r.id});`);
             this.__generateRmRequest(r.id)
               .then(() => {
-                if (cr?.opts?.promise) {
-                  cr.opts.promise.resolve();
+                if (cr.opts?.dboComplete) {
+                  cr.opts.dboComplete.resolve();
                 }
               }).catch((err) => {
-                if (cr?.opts?.promise) {
-                  cr.opts.promise.reject(err);
+                if (cr.opts?.dboComplete) {
+                  cr.opts.dboComplete.reject(err);
                 }
               });
           });
@@ -185,7 +184,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
                 o.id = new ObjectId().toHexString();
               }
 
-              this.__generateUpdateRequest(entity.id, path.join('.'), o);
+              this.__generateUpdateRequest(entity.id, path.join('.'), o)
+                .then(() => {
+                  if (cr.opts?.dboComplete) {
+                    cr.opts.dboComplete.resolve();
+                  }
+                }).catch((err) => {
+                  if (cr.opts?.dboComplete) {
+                    cr.opts.dboComplete.reject(err);
+                  }
+                });
             } else if (indexSplice.removed.length > 0){
               if(indexSplice.removed.length > 1) {
                 this._logger.debug('Index splice removed.length > 1', indexSplice.removed);
@@ -195,7 +203,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
                 path.push(indexSplice.index);
                 path.push('__remove__');
 
-                this.__generateUpdateRequest(entity.id, path.join('.'), '');
+                this.__generateUpdateRequest(entity.id, path.join('.'), '')
+                  .then(() => {
+                    if (cr.opts?.dboComplete) {
+                      cr.opts.dboComplete.resolve();
+                    }
+                  }).catch((err) => {
+                    if (cr.opts?.dboComplete) {
+                      cr.opts.dboComplete.reject(err);
+                    }
+                  });
               }
             }
           });
@@ -233,12 +250,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
         // Addition to a base object
         this.__generateAddRequest(item)
           .then(() => {
-            if (cr?.opts?.promise) {
-              cr.opts.promise.resolve();
+            if (cr?.opts?.dboComplete) {
+              cr.opts.dboComplete.resolve();
             }
           }).catch((err) => {
-            if (cr?.opts?.promise) {
-              cr.opts.promise.reject(err);
+            if (cr?.opts?.dboComplete) {
+              cr.opts.dboComplete.reject(err);
             }
           });
         return;
@@ -246,12 +263,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
       this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
         .then(() => {
-          if (cr?.opts?.promise) {
-            cr.opts.promise.resolve();
+          if (cr?.opts?.dboComplete) {
+            cr.opts.dboComplete.resolve();
           }
         }).catch((err) => {
-          if (cr?.opts?.promise) {
-            cr.opts.promise.reject(err);
+          if (cr?.opts?.dboComplete) {
+            cr.opts.dboComplete.reject(err);
           }
         });
     }
@@ -570,6 +587,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     if (this.bundling && this.BUNDLED_REQUESTS_TYPES.includes(request.type)) {
       this._logger.debug('bulk compatible request, trying to chunk:', request.type);
+
       const requests = [
         request,
         ...this._requestQueue.filter((r) => r.type === request.type)
@@ -587,6 +605,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
           contentType: 'application/json',
           body: null,
           dependentRequests: requests,
+          resolve: request.resolve,
+          reject: request.reject,
         };
 
         if (request.type === 'bulk/update') {
@@ -594,6 +614,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
             id: rq.entityId,
             body: rq.body
           }));
+
+          request.resolve = requests.map((rq) => rq.resolve);
+          request.reject = requests.map((rq) => rq.reject);
         } else {
           request.body = requests.map((rq) => rq.body);
         }
@@ -607,7 +630,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private async __generateRequest(request: any) {
     const body = (request.body) ? JSON.stringify(request.body) : null;
     try {
-      const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}`, {
+      const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}&apiPath=${this._settings.apiPath}`, {
         method: request.method,
         cache: 'no-store',
         headers: {
@@ -624,12 +647,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
       this.status = 'done';
       const data = await response.json();
-      if (request.reject) request.resolve(data);
+      if (request.resolve && !Array.isArray(request.resolve)) request.resolve(data);
+      if (request.resolve && Array.isArray(request.resolve)) request.resolve.forEach((rq: any) => rq(data));
     } catch(err) {
       // will only reject on network failure or if anything prevented the request from completing.
       this._logger.error(err);
 
-      if (request.reject) request.reject(err);
+      if (request.reject && !Array.isArray(request.reject)) request.reject(err);
       this.status = 'error';
     } finally {
       this.__updateQueue();

@@ -30,7 +30,7 @@ export interface NotifyChangeOpts {
   readonly?: boolean,
   silent?: boolean,
   splice?: boolean,
-  promise?: {
+  dboComplete?: {
     resolve: Function,
     reject: Function,
   },
@@ -100,7 +100,7 @@ export class ButtressStore implements ButtressStoreInterface {
     if (!id) throw new Error('Unable to remove property');
 
     const parent = this.get(prePath);
-    const isMap = (parent instanceof Map); 
+    const isMap = (parent instanceof Map);
     const prop = (isMap) ? parent.get(id) : parent[id];
 
     this.__notifyPath(`${path}.splices`, { indexSplices: [{
@@ -134,10 +134,15 @@ export class ButtressStore implements ButtressStoreInterface {
     return prop;
   }
 
-  set(path: string, value: any, opts?: NotifyChangeOpts, skip: boolean = false): string|undefined {
+  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
     const change = opts?.silent || this.__notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
-    if (change) this.__invalidateData(skip);
+    if (change) {
+      this.__invalidateData();
+    } else {
+      opts?.dboComplete?.resolve();
+    }
+
     return setPath;
   }
 
@@ -296,7 +301,7 @@ export class ButtressStore implements ButtressStoreInterface {
     return changed;
   }
 
-  private __invalidateData(skip: boolean = false) {
+  private __invalidateData() {
     this.__logger.debug(`__invalidateData __dataInvalid:${this.__dataInvalid}`);
     if (!this.__dataInvalid) {
       this.__dataInvalid = true;
@@ -304,24 +309,24 @@ export class ButtressStore implements ButtressStoreInterface {
         // Bundle up changes
         if (this.__dataInvalid) {
           this.__dataInvalid = false;
-          this.__flushProperties(skip);
+          this.__flushProperties();
         }
       });
     }
   }
 
-  private __flushProperties(skip: boolean) {
+  private __flushProperties() {
     const changedProps = this.__dataPending;
     this.__logger.debug(`__flushProperties __dataPending:`, this.__dataPending);
     if (changedProps !== null) {
       this.__dataPending = null;
       this.__dataOld = null;
-      this.__propertiesChanged(changedProps, skip);
+      this.__propertiesChanged(changedProps);
     }
   }
 
   // eslint-disable-next-line class-methods-use-this
-  private __propertiesChanged(changedProps: MapAny, skip: boolean = false) {
+  private __propertiesChanged(changedProps: MapAny) {
     let ran = false;
 
     this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
@@ -346,7 +351,7 @@ export class ButtressStore implements ButtressStoreInterface {
             if (Array.isArray(changedProps[prop])) {
               changedProps[prop].forEach((p: any) => fx.cb(...this.__marshalArgs(fx.info.args, prop, p)));
             } else {
-              fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]), skip);
+              fx.cb(...this.__marshalArgs(fx.info.args, prop, changedProps[prop]));
             }
 
             ran = true;
