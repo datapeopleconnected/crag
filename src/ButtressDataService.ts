@@ -136,8 +136,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (/\.splices$/.test(cr.path) === true) {
       if (path.length < 4) {
         // Modification to base
-        cr.value.indexSplices.forEach((i: any) => {
+        cr.value.indexSplices.forEach((i: IndexSplice) => {
           if (i.opts?.readonly) {
+            this._logger.debug(`Ignoring readonly change to base indexSplice: ${cr.path}`);
             return;
           }
 
@@ -174,6 +175,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
         if (cr.value.indexSplices?.length > 0) {
           cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
+            if (indexSplice.opts?.readonly) {
+              this._logger.debug(`Ignoring readonly change to indexSplice: ${cr.path}`);
+              return;
+            }
+
             const o = indexSplice.object[indexSplice.index];
             if (indexSplice.addedCount > 0) {
               // Remove datastore entity prefix
