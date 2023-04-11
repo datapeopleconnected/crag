@@ -160,7 +160,7 @@ export class ButtressDbService extends LtnService {
     if (response.ok) {
       const body = await response.json();
       this._schema = body.reduce((obj: {[key: string]: ButtressSchema}, schema: ButtressSchema) => {
-        const schemaName = this._singularise(schema.name);
+        const schemaName = (schema.core) ? this._stripTrailingS(schema.name) : schema.name;
         obj[schemaName] = schema; // eslint-disable-line no-param-reassign
         return obj;
       }, {});
@@ -179,15 +179,15 @@ export class ButtressDbService extends LtnService {
     const dataServices: string[] = Object.keys(this._dataServices || []);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
-    const coreSchema = this._settings?.coreSchema;
     schemas.forEach((name) => {
       if (!this._schema) return;
+      const schema = this._schema[name];
       // TODO change apps and users api to app and user to be consistent with the endpoints
-      const endpointName = this._singularise(name);
+      const endpointName = (schema.core) ? this._stripTrailingS(name) : schema.name;
       if (dataServices.includes(endpointName)) {
         this._dataServices[endpointName].updateSchema(this._schema[name]);
       } else {
-        const isCore = (coreSchema && coreSchema.length > 0) ? coreSchema.some((s) => name.includes(Sugar.String.camelize(s, false)) ) : false;
+        const isCore = (schema.core === true);
         this._dataServices[endpointName] = new ButtressDataService(endpointName, isCore, this._settings, this._store, this._schema[name]);
         if (this._settings.logLevel) {
           this._dataServices[endpointName].setLogLevel(this._settings.logLevel);
@@ -384,15 +384,14 @@ export class ButtressDbService extends LtnService {
   }
 
     // eslint-disable-next-line class-methods-use-this
-  _singularise(word: string) {
-    return word; // TUT FUCKING TUT
-    // const lastLetter = word.slice(-1);
-    // let output = word;
-    // if (lastLetter === 's') {
-    //   output = word.substring(0 , word.length - 1);
-    // }
+  _stripTrailingS(word: string): string {
+    const lastLetter = word.slice(-1);
+    let output = word;
+    if (lastLetter === 's') {
+      output = word.substring(0 , word.length - 1);
+    }
 
-    // return output;
+    return output;
   }
 
   async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {
