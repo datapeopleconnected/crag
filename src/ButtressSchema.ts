@@ -6,6 +6,7 @@ import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 export type ButtressSchema = {
   name: string,
   type: string,
+  core?: boolean,
   properties: ButtressSchemaProperties,
 };
 export default ButtressSchema;
