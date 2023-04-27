@@ -153,7 +153,7 @@ export default class ButtressDataRealtime {
     // }
 
     const pathSpec = data.pathSpec.split('/').map((ps: string) => Sugar.String.camelize(ps, false)).filter((s: string) => s && s !== '');
-    const path = data.path.split('/').map((p: string) => Sugar.String.camelize(p, false)).filter((s: string) => s && s !== '');
+    const path = data.path.split('/').filter((s: string) => s && s !== '');
     const paramsRegex = /:(([a-z]|[A-Z]|[0-9]|[-])+)(?:\(.*?\))?$/;
 
     const pathStr = path.join('/');

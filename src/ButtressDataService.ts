@@ -25,6 +25,8 @@ export interface QueryOpts {
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
 
+  path: string;
+
   private _logger: LtnLogger;
 
   readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
@@ -53,6 +55,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this.name = name;
     this.core = core;
     this._settings = settings;
+
+    this.path = this.name;
 
     this._logger = new LtnLogger(`buttress-data-service-${name}`);
 
@@ -668,9 +672,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   getUrl(...parts: string[]) {
     if (!this.core && this._settings.apiPath) {
-      return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.name}/${parts.join('/')}`;
+      return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.path}/${parts.join('/')}`;
     }
 
-    return `${this._settings.endpoint}/api/v1/${this.name}/${parts.join('/')}`;
+    return `${this._settings.endpoint}/api/v1/${this.path}/${parts.join('/')}`;
   }
 }
