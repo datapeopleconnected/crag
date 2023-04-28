@@ -14,10 +14,20 @@ export interface QueryResult {
   total: number,
   results: ButtressEntity[]
 }
+export interface SortOpts {
+  path: string
+  type?: 'STRING'|'NUMBER'|'DATE'|'BOOLEAN'
+  direction: 'ASC'|'DESC'
+}
+
+export interface BJSSortOpt {
+  [key: string]: number
+}
+
 export interface QueryOpts {
   limit?: number
   skip?: number
-  sort?: any
+  sort?: SortOpts
   project?: any
   bust?: boolean
 }
@@ -320,18 +330,21 @@ export default class ButtressDataService implements ButtressStoreInterface {
     });
   }
 
-  private __filterLocalData(buttressQuery: any, opts: {total: number, limit?: number, skip?: number, sort?: string}): QueryResult {
+  private __filterLocalData(buttressQuery: any, opts: {total: number, limit?: number, skip?: number, sort?: SortOpts}): QueryResult {
     let data = this._store.get(this.name);
 
+    // Pirate mode
+    let arr = Array.from(data.values());
+
+    if (opts.sort) {
+      arr = arr.sort((a: any, b: any) => this.__sort(a, b, opts.sort as SortOpts));
+    }
+
     try {
-      data = this.__processQueryPart(buttressQuery, Array.from(data.values()));
+      data = this.__processQueryPart(buttressQuery, arr);
     } catch (err) {
       this._logger.error('Query was:', this.query);
       throw err;
-    }
-
-    if (opts?.sort) {
-    //   data.sort((a: any, b: any) => this.__sort(a, b));
     }
 
     if (opts?.limit) {
@@ -344,6 +357,32 @@ export default class ButtressDataService implements ButtressStoreInterface {
       total: opts.total,
       results: data
     };
+  }
+
+  private __sort(a: any, b: any, sort: SortOpts): number {
+    let aVal = this._store.get(sort.path, a);
+    let bVal = this._store.get(sort.path, b);
+
+    let sortType = sort.type || 'STRING';
+
+    if (sortType === 'STRING') {
+      aVal = (aVal) ? aVal.toLowerCase() : '';
+      bVal = (bVal) ? bVal.toLowerCase() : '';
+    } else if (sortType === 'DATE') {
+      aVal = (aVal) ? new Date(aVal).getTime() : 0;
+      bVal = (bVal) ? new Date(bVal).getTime() : 0;
+      sortType = 'NUMBER';
+    }
+
+    if (sortType === 'NUMBER') {
+      return (sort.direction === 'ASC') ? aVal - bVal : bVal - aVal;
+    }
+
+    if (sort.direction === 'ASC') {
+      return aVal.localeCompare(bVal);
+    }
+
+    return bVal.localeCompare(aVal);
   }
 
   private __processQueryPart(query: any, data: Array<any>) {
@@ -450,7 +489,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
       return Promise.resolve(false);
     }
 
-    const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, opts?.sort, opts?.project);
+    let sort: undefined | BJSSortOpt;
+    if (opts?.sort) {
+      sort = {};
+      sort[opts.sort.path] = opts.sort.direction === 'ASC' ? 1 : -1;
+    }
+
+    const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
     this._store.set(this.name, new Map([...this.get(this.name), ...body.map((o: any) => [o.id, o])]), {
       silent: true
@@ -516,7 +561,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     });
   }
 
-  private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: string, project: any): Promise<ButtressEntity[]> {
+  private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: undefined | BJSSortOpt, project: any): Promise<ButtressEntity[]> {
     return this.__queueRequest({
       type: 'search',
       url: this.getUrl(),
