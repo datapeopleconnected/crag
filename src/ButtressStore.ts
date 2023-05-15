@@ -137,7 +137,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
-    const change = opts?.silent || this.__notifyPath(path, value, opts);
+    const change = opts?.silent || this.notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
     if (change) {
       this.__invalidateData();
@@ -268,12 +268,16 @@ export class ButtressStore implements ButtressStoreInterface {
     const old = this.get(path);
 
     if (opts?.forceChanged && old !== undefined) {
-      if (!this.__dataPending)  this.__dataPending = {};
+      const modifiedOpts = opts;
+      modifiedOpts.localOnly = true;
 
+      if (!this.__dataPending) this.__dataPending = {};
       this.__dataPending[path] = {
         value,
-        opts
+        modifiedOpts
       };
+
+      this.__invalidateData();
 
       return true;
     }
