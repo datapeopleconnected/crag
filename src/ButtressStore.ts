@@ -9,7 +9,8 @@ export interface ButtressStoreInterface {
   push: Function,
   pushExt: Function,
   splice: Function,
-  spliceExt:Function
+  spliceExt:Function,
+  notifyPath: Function
 }
 
 export interface ButtressEntity {
@@ -27,7 +28,8 @@ interface PathSig {
 }
 
 export interface NotifyChangeOpts {
-  readonly?: boolean,
+  localOnly?: boolean,
+  forceChanged?: boolean,
   silent?: boolean,
   splice?: boolean,
   dboComplete?: {
@@ -103,7 +105,7 @@ export class ButtressStore implements ButtressStoreInterface {
     const isMap = (parent instanceof Map);
     const prop = (isMap) ? parent.get(id) : parent[id];
 
-    this.__notifyPath(`${path}.splices`, { indexSplices: [{
+    this.notifyPath(`${path}.splices`, { indexSplices: [{
       index: 0,
       addedCount: 0,
       removed: [prop],
@@ -162,7 +164,7 @@ export class ButtressStore implements ButtressStoreInterface {
       }
 
       this.set(path, [], {
-        readonly: true,
+        localOnly: true,
         silent: true
       });
       array = this.get(path);
@@ -171,7 +173,7 @@ export class ButtressStore implements ButtressStoreInterface {
     const len = array.length;
     const ret = array.push(...items);
 
-    // if (!opts?.readonly && items.length) {
+    // if (!opts?.localOnly && items.length) {
     if (items.length) {
       this.__notifySplices(array, path, [{
         index: len,
@@ -201,7 +203,7 @@ export class ButtressStore implements ButtressStoreInterface {
       }
 
       this.set(path, [], {
-        readonly: true,
+        localOnly: true,
         silent: true
       });
       array = this.get(path);
@@ -231,8 +233,8 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    this.__notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
-    this.__notifyPath(`${path}.length`, array.length);
+    this.notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
+    this.notifyPath(`${path}.length`, array.length);
     this.__invalidateData();
   }
 
@@ -262,13 +264,21 @@ export class ButtressStore implements ButtressStoreInterface {
     return parts.join('.');
   }
 
-  private __notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
-    let val = value;
-    if (arguments.length === 1) {
-      val = this.get(path);
+  notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
+    const old = this.get(path);
+
+    if (opts?.forceChanged && old !== undefined) {
+      if (!this.__dataPending)  this.__dataPending = {};
+
+      this.__dataPending[path] = {
+        value,
+        opts
+      };
+
+      return true;
     }
 
-    const old = this.get(path);
+    const val = (arguments.length === 1) ? old : value;
     const changed = old !== val;
 
     if (changed) {

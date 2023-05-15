@@ -66,7 +66,8 @@ export class ButtressDbService extends LtnService {
       splice: (path: string, start: number, deleteCount?: number, ...items: any[]): any[] =>
         this._getDataService(path).splice(path, start, deleteCount, ...items),
       spliceExt: (path: string, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] =>
-        this._getDataService(path).spliceExt(path, start, deleteCount, opts, ...items)
+        this._getDataService(path).spliceExt(path, start, deleteCount, opts, ...items),
+      notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): string|undefined => this._getDataService(path).notifyPath(path, value, opts),
     };
 
     // Store

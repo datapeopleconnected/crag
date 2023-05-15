@@ -128,6 +128,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this._store.spliceExt(path, this._schema, start, deleteCount, opts, ...items)
   }
 
+  notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
+    return this._store.notifyPath(path, value, opts);
+  }
+
   // eslint-disable-next-line class-methods-use-this
   _processDataChange(cr: any) : void {
     if (/\.length$/.test(cr.path) === true) {
@@ -139,8 +143,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
       return;
     }
 
-    if (cr.opts?.readonly) {
-      this._logger.debug(`Ignoring readonly change: ${cr.path}`);
+    if (cr.opts?.localOnly) {
+      this._logger.debug(`Ignoring localOnly change: ${cr.path}`);
       return;
     }
 
@@ -151,8 +155,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
       if (path.length < 4) {
         // Modification to base
         cr.value.indexSplices.forEach((i: IndexSplice) => {
-          if (i.opts?.readonly) {
-            this._logger.debug(`Ignoring readonly change to base indexSplice: ${cr.path}`);
+          if (i.opts?.localOnly) {
+            this._logger.debug(`Ignoring localOnly change to base indexSplice: ${cr.path}`);
             return;
           }
 
@@ -189,8 +193,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
         if (cr.value.indexSplices?.length > 0) {
           cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
-            if (indexSplice.opts?.readonly) {
-              this._logger.debug(`Ignoring readonly change to indexSplice: ${cr.path}`);
+            if (indexSplice.opts?.localOnly) {
+              this._logger.debug(`Ignoring localOnly change to indexSplice: ${cr.path}`);
               return;
             }
 

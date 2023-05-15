@@ -220,7 +220,7 @@ export default class ButtressDataRealtime {
         const entity = this._store.get(`${pathParts.collectionName}.${responses[x].id}`);
         if (entity) {
           this._store.delete(pathParts.collectionName, responses[x].id, {
-            readonly: true
+            localOnly: true
           });
         }
       };
@@ -228,7 +228,7 @@ export default class ButtressDataRealtime {
       const entity = this._store.get(`${pathParts.collectionName}.${pathParts.id}`);
       if (entity) {
         this._store.delete(pathParts.collectionName, pathParts.id, {
-          readonly: true
+          localOnly: true
         });
       }
     }
@@ -245,7 +245,7 @@ export default class ButtressDataRealtime {
       if (entity) return; // Skip as it already exists
 
       this._store.set(`${pathParts.collectionName}.${responses[x].id}`, response, {
-        readonly: true
+        localOnly: true
       });
     }
   }
@@ -261,22 +261,22 @@ export default class ButtressDataRealtime {
     if (response.type === 'scalar') {
       this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, response.value, {
-        readonly: true
+        localOnly: true
       });
     } else if (response.type === 'scalar-increment') {
       this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, this._store.get(updatePath) + response.value, {
-        readonly: true
+        localOnly: true
       });
     } else if (response.type === 'vector-add') {
       this._logger.debug('inserting', updatePath, response.value);
       this._store.pushExt(updatePath, {
-        readonly: true,
+        localOnly: true,
       }, response.value);
     } else if (response.type === 'vector-rm') {
       this._logger.debug('removing', updatePath, response.value);
       this._store.spliceExt(updatePath, response.value.index, response.value.numRemoved, {
-        readonly: true
+        localOnly: true
       });
     }
   }
