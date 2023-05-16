@@ -1,5 +1,4 @@
-import Sugar from 'sugar';
-import { html, css } from 'lit';
+import { html } from 'lit';
 import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
@@ -12,6 +11,10 @@ import ButtressSchema from './ButtressSchema.js';
 import {ButtressSchemaFactory} from './ButtressSchemaFactory.js';
 
 import { Settings } from './helpers.js';
+
+export interface customButtressStoreInterface extends ButtressStoreInterface {
+  clearQueryMap: Function,
+}
 
 export class ButtressDbService extends LtnService {
   // @property({ type: String, attribute: false }) endpoint = "hello";
@@ -46,7 +49,7 @@ export class ButtressDbService extends LtnService {
 
   private _awaitConnectionPool: Array<Function> = [];
 
-  private _dsStoreInterface: ButtressStoreInterface;
+  private _dsStoreInterface: customButtressStoreInterface;
 
   constructor() {
     super();
@@ -68,6 +71,7 @@ export class ButtressDbService extends LtnService {
       spliceExt: (path: string, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] =>
         this._getDataService(path).spliceExt(path, start, deleteCount, opts, ...items),
       notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): boolean => this._getDataService(path).notifyPath(path, value, opts),
+      clearQueryMap: (path: string) => this._getDataService(path).clearQueryMap(),
     };
 
     // Store

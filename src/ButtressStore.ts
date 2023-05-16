@@ -274,7 +274,7 @@ export class ButtressStore implements ButtressStoreInterface {
       if (!this.__dataPending) this.__dataPending = {};
       this.__dataPending[path] = {
         value,
-        modifiedOpts
+        opts: modifiedOpts,
       };
 
       this.__invalidateData();

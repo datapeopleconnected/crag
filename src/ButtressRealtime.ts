@@ -3,7 +3,7 @@ import Sugar from 'sugar';
 
 import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
 
-import {ButtressStore, ButtressStoreInterface} from "./ButtressStore.js";
+import {customButtressStoreInterface} from "./ButtressDbService.js";
 
 import {Settings} from './helpers.js';
 
@@ -16,7 +16,7 @@ export default class ButtressDataRealtime {
 
   private _logger: LtnLogger;
 
-  private _store: ButtressStoreInterface;
+  private _store: customButtressStoreInterface;
 
   private _settings: Settings;
 
@@ -37,7 +37,7 @@ export default class ButtressDataRealtime {
     'db-disconnect-room',
   ];
 
-  constructor(store: ButtressStoreInterface, settings: Settings, dispatchCustomEvent: Function) {
+  constructor(store: customButtressStoreInterface, settings: Settings, dispatchCustomEvent: Function) {
     this._store = store;
     this._settings = settings;
 
@@ -110,8 +110,10 @@ export default class ButtressDataRealtime {
   // eslint-disable-next-line class-methods-use-this
   private _handleRxEvent(type:string, payload: any) {
     this._logger.debug(`RX Event type:${type} `, payload);
-    if (type === 'db-disconnect-room' || type === 'db-connect-room') {
-      // Do stuff
+    if (type === 'db-connect-room') {
+      this._loadAccessControlData(payload);
+    } else if (type === 'db-disconnect-room') {
+      this._clearAccessControlQueryHash(payload);
     } else if (type === 'clear-local-db') {
       // this._clearUserLocaldata(data);
       // Do stuff
@@ -142,7 +144,36 @@ export default class ButtressDataRealtime {
     this._lastSequence[payload.room] = payload.sequence;
   }
 
-  private _clearUserLocaldata(payload: any) {
+  // eslint-disable-next-line class-methods-use-this
+  private async _loadAccessControlData(payload: any) {
+    const userId = this._settings?.userId;
+    const apiPath = this._settings?.apiPath;
+    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
+
+    const {collections} = payload;
+    if (!collections || (collections && collections.length < 1)) return;
+
+    for await (const collection of collections) {
+      this._store.notifyPath(collection, undefined, {forceChanged: true});
+    }
+
+    this._lastSequence[payload.room] = 0;
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  private async _clearAccessControlQueryHash(payload: any) {
+    const userId = this._settings?.userId;
+    const apiPath = this._settings?.apiPath;
+    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
+
+    const {collections} = payload;
+    if (!collections || (collections && collections.length < 1)) return;
+
+    for await (const collection of collections) {
+      this._store.clearQueryMap(collection);
+    }
+
+    this._lastSequence[payload.room] = 0;
   }
 
   // eslint-disable-next-line class-methods-use-this

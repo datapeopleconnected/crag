@@ -76,7 +76,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this._store.set(this.name, new Map());
 
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any, map: any) => this._processDataChange(cr));
+    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
   }
 
   setLogLevel(level: LtnLogLevel) {
@@ -524,6 +524,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     return hash;
+  }
+
+  clearQueryMap() {
+    this._queryMap = [];
   }
 
   private __updateQueue(): undefined {
