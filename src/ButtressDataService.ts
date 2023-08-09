@@ -693,11 +693,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private async __generateRequest(request: any) {
     const body = (request.body) ? JSON.stringify(request.body) : null;
     try {
-      const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}&apiPath=${this._settings.apiPath}`, {
+      const response = await fetch(`${request.url}?urq=${Date.now()}`, {
         method: request.method,
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this._settings.token}`,
         },
         body,
       })
