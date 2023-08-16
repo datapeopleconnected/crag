@@ -453,7 +453,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await this._bjsRequest('POST', `${endpoint}/api/v1/appDataSharing`, token, appDataSharing, {apiPath});
+      const res = await this._bjsRequest('POST', `${endpoint}/api/v1/app-data-sharing`, token, appDataSharing, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -492,7 +492,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app/policyPropertyList`, token, policySelectorsList, {apiPath});
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app/policy-property-list`, token, policySelectorsList, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -511,7 +511,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/appDataSharing/${dataSharingId}/token`, token, {
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app-data-sharing/${dataSharingId}/token`, token, {
         token: remoteToken
       }, {apiPath});
 
