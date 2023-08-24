@@ -140,28 +140,30 @@ export class ButtressDbService extends LtnService {
     this._connected = true;
   }
 
+  // eslint-disable-next-line class-methods-use-this
+  private _bjsRequest(method: string, path: string, token: string, body?: any, headers?: { [key: string]: string }, queryString?: any) {
+    const qs = new URLSearchParams({urq: Date.now(), ...queryString});
+
+    return fetch(`${path}?${qs.toString()}`, {
+      method,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        ...headers,
+      },
+      body: (body) ? JSON.stringify(body) : undefined,
+    });
+  }
+
   private async _fetchAppSchema() {
     this._debug('_fetchAppSchema', this._settings);
     if (!this._settings) return;
 
-    // eslint-disable-next-line no-undef
-    let url = `${this._settings.endpoint}/api/v1/app/schema?urq${Date.now()}&token=${this._settings.token}`;
-    if (this._settings.coreSchema) {
-      url += `&core=${this._settings.coreSchema}`;
-    }
+    const token = this._settings.token || '';
+    const coreSchema: string[] = (this._settings.coreSchema) ? (this._settings.coreSchema) : [];
 
-    const req = url;
-
-    // eslint-disable-next-line no-undef
-    const init: RequestInit = {
-      method: 'GET',
-      cache: 'no-cache',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    };
-
-    const response = await fetch(req, init);
+    const response = await this._bjsRequest('GET', `${this._settings.endpoint}/api/v1/app/schema`, token, null, {core: coreSchema.join(',')});
     if (response.ok) {
       const body = await response.json();
       this._schema = body.reduce((obj: {[key: string]: ButtressSchema}, schema: ButtressSchema) => {
@@ -388,7 +390,7 @@ export class ButtressDbService extends LtnService {
     }
   }
 
-    // eslint-disable-next-line class-methods-use-this
+  // eslint-disable-next-line class-methods-use-this
   _stripTrailingS(word: string): string {
     const lastLetter = word.slice(-1);
     let output = word;
@@ -406,17 +408,11 @@ export class ButtressDbService extends LtnService {
       if (!endpoint || !token) {
         throw new Error('Invalid Buttress endpoint or a token');
       }
-      const res = await fetch(`${endpoint}/api/v1/lambda?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          lambda,
-          auth,
-        }),
-      });
+
+      const res = await this._bjsRequest('POST', `${endpoint}/api/v1/lambda`, token, {
+        lambda,
+        auth,
+      }, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -434,17 +430,11 @@ export class ButtressDbService extends LtnService {
       if (!endpoint || !token) {
         throw new Error('Invalid Buttress endpoint or a token');
       }
-      const res = await fetch(`${endpoint}/api/v1/lambda/${lambda.id}/deployment?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'PUT',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          branch: lambda.git.branch,
-          hash: lambda.git.hash,
-        }),
-      });
+
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/lambda/${lambda.id}/deployment`, token, {
+        branch: lambda.git.branch,
+        hash: lambda.git.hash,
+      }, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -463,14 +453,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/appDataSharing?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(appDataSharing),
-      });
+      const res = await this._bjsRequest('POST', `${endpoint}/api/v1/app-data-sharing`, token, appDataSharing, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -490,14 +473,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/app/schema?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'PUT',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(schema),
-      });
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app/schema`, token, schema, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -516,14 +492,7 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/app/policyPropertyList?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'PUT',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(policySelectorsList),
-      });
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app/policy-property-list`, token, policySelectorsList, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);
@@ -542,16 +511,9 @@ export class ButtressDbService extends LtnService {
         throw new Error('Invalid Buttress endpoint or a token');
       }
 
-      const res = await fetch(`${endpoint}/api/v1/appDataSharing/${dataSharingId}/token?urq=${Date.now()}&token=${token}&apiPath=${apiPath}`, {
-        method: 'PUT',
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          token: remoteToken
-        }),
-      });
+      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app-data-sharing/${dataSharingId}/token`, token, {
+        token: remoteToken
+      }, {apiPath});
 
       const outcome = await res.json();
       if (res.status !== 200) throw new Error(outcome.message);

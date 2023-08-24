@@ -36,6 +36,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
 
   path: string;
+  
+  private __route: string;
 
   private _logger: LtnLogger;
 
@@ -67,6 +69,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._settings = settings;
 
     this.path = this.name;
+
+    this.__route = this.path.split('-').map((part) => Sugar.String.dasherize(part)).join('/');
 
     this._logger = new LtnLogger(`buttress-data-service-${name}`);
 
@@ -693,11 +697,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private async __generateRequest(request: any) {
     const body = (request.body) ? JSON.stringify(request.body) : null;
     try {
-      const response = await fetch(`${request.url}?urq=${Date.now()}&token=${this._settings.token}&apiPath=${this._settings.apiPath}`, {
+      const response = await fetch(`${request.url}?urq=${Date.now()}`, {
         method: request.method,
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this._settings.token}`,
         },
         body,
       })
@@ -725,9 +730,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   getUrl(...parts: string[]) {
     if (!this.core && this._settings.apiPath) {
-      return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.path}/${parts.join('/')}`;
+      return `${this._settings.endpoint}/${this._settings.apiPath}/api/v1/${this.__route}/${parts.join('/')}`;
     }
 
-    return `${this._settings.endpoint}/api/v1/${this.path}/${parts.join('/')}`;
+    return `${this._settings.endpoint}/api/v1/${this.__route}/${parts.join('/')}`;
   }
 }
