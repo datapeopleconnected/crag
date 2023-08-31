@@ -227,7 +227,7 @@ export class ButtressDbService extends LtnService {
     dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
   }
 
-  create(path: string, value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
+  create(path: string, value: ButtressEntity, opts?: NotifyChangeOpts): string | undefined {
     const parts = path.toString().split('.');
     if (parts.length > 1) throw new Error('Create is only avaible for top level entities');
     const [schema] = parts;
@@ -244,12 +244,12 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  get(path: string): any {
+  get<T extends ButtressEntity>(path: string): T | undefined {
     return this._dsStoreInterface.get(path);
   }
 
   // eslint-disable-next-line class-methods-use-this
-  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+  set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
     return this._dsStoreInterface.set(path, value, opts);
   }
 
@@ -287,20 +287,20 @@ export class ButtressDbService extends LtnService {
     return this._dataServices[root];
   }
 
-  createObject(path: string) : any {
+  createObject<T extends ButtressEntity>(path: string) : T {
     const schema = this.getSchema(path.split('.').shift());
     if (typeof schema === 'boolean') throw new Error(`Unable to find schema for path ${path}`);
-    
-    return ButtressSchemaFactory.create(schema, path);
+
+    return ButtressSchemaFactory.create(schema, path) as T;
   }
 
-  async getById(dataService: string, entityId: string) {
+  async getById<T extends ButtressEntity>(dataService: string, entityId: string): Promise<T | undefined> {
     if (!entityId) throw new Error('Unable to get property without an id');
 
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
 
-    return ds.getById(entityId);
+    return await ds.getById(entityId) as T;
   }
 
   async query(dataService: string, buttressQuery: any, opts?: QueryOpts) {
