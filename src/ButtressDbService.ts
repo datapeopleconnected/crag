@@ -244,7 +244,7 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  get<T extends ButtressEntity>(path: string): T {
+  get<T extends ButtressEntity>(path: string): T | undefined {
     return this._dsStoreInterface.get(path);
   }
 
@@ -290,11 +290,11 @@ export class ButtressDbService extends LtnService {
   createObject<T extends ButtressEntity>(path: string) : T {
     const schema = this.getSchema(path.split('.').shift());
     if (typeof schema === 'boolean') throw new Error(`Unable to find schema for path ${path}`);
-    
+
     return ButtressSchemaFactory.create(schema, path) as T;
   }
 
-  async getById<T extends ButtressEntity>(dataService: string, entityId: string): Promise<T> {
+  async getById<T extends ButtressEntity>(dataService: string, entityId: string): Promise<T | undefined> {
     if (!entityId) throw new Error('Unable to get property without an id');
 
     const ds = this._dataServices[dataService];
