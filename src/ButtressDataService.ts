@@ -313,6 +313,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
     const entity = await this.__generateGetByIdRequest(id);
+
+    if (this._store.get(`${this.name}.${entity.id}`)) return entity;
+
     this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
       silent: true
     });
@@ -505,7 +508,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
-    this._store.set(this.name, new Map([...this.get(this.name), ...body.map((o: any) => [o.id, o])]), {
+    // Filter out any objects which exists in the local store
+    const filteredBody = body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
+    this._store.set(this.name, new Map([...this.get(this.name), ...filteredBody.map((o: any) => [o.id, o])]), {
       silent: true
     });
     this._queryMap.push(`${hash}`);
