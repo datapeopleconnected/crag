@@ -63,6 +63,15 @@ interface Subscriptions {
   [key: string]: Array<Subscription>
 }
 
+export type CRCallback = (...args: any[]) => void;
+
+export interface CR {
+  path?: string,
+  value: any,
+  base?: Map<string, ButtressEntity>,
+  opts: NotifyChangeOpts
+}
+
 let dedupeId = 0;
 
 export class ButtressStore implements ButtressStoreInterface {
@@ -378,7 +387,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   private __marshalArgs(args: any[], path: string, changedProp: any) {
-    const values = [];
+    const values: CR[] = [];
 
     for (let i = 0, l = args.length; i < l; i += 1) {
       const {name, structured, wildcard, argVal, literal} = args[i];
@@ -420,7 +429,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  subscribe(pathsStr: string, fn: Function): string {
+  subscribe(pathsStr: string, fn: CRCallback): string {
     const id = LtnService.generateId();
     this.__logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
