@@ -4,7 +4,7 @@ import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
 // import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
 
 import ButtressDataService, { QueryOpts } from './ButtressDataService.js';
-import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts} from './ButtressStore.js';
+import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts, CRCallback} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
 
 import ButtressSchema from './ButtressSchema.js';
@@ -264,7 +264,7 @@ export class ButtressDbService extends LtnService {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  subscribe(path: string, cb: Function): string {
+  subscribe(path: string, cb: CRCallback): string {
     return this._store.subscribe(path, cb);
   }
 

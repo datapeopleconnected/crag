@@ -313,6 +313,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
     const entity = await this.__generateGetByIdRequest(id);
+
+    if (this._store.get(`${this.name}.${entity.id}`)) return entity;
+
     this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
       silent: true
     });
@@ -434,8 +437,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
       $lte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val <= rhs) !== -1,
       $rex: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => (new RegExp(rhs)).test(val)) !== -1,
       $rexi: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => (new RegExp(rhs, 'i')).test(val)) !== -1,
-      $in: (rhs: any) => (lhs: any) => rhs.indexOf(lhs[field]) !== -1,
-      $nin: (rhs: any) => (lhs: any) => rhs.indexOf(lhs[field]) === -1,
+      $in: (rhs: any) => (lhs: any) => (Array.isArray(lhs[field])) ? lhs[field].some((v: any) => rhs.indexOf(v) !== -1) : rhs.indexOf(lhs[field]) !== -1,
+      $nin: (rhs: any) => (lhs: any) => (Array.isArray(lhs[field])) ? lhs[field].some((v: any) => rhs.indexOf(v) !== -1) === false : rhs.indexOf(lhs[field]) === -1,
       $exists: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val === undefined) === -1 === rhs,
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
       $elMatch: (rhs: any) => (lhs: any) => this.__processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
@@ -505,7 +508,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
-    this._store.set(this.name, new Map([...this.get(this.name), ...body.map((o: any) => [o.id, o])]), {
+    // Filter out any objects which exists in the local store
+    const filteredBody = body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
+    this._store.set(this.name, new Map([...this.get(this.name), ...filteredBody.map((o: any) => [o.id, o])]), {
       silent: true
     });
     this._queryMap.push(`${hash}`);
