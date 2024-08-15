@@ -26,7 +26,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@lighten/ltn-element": "0.0.6",
+    "@lighten/ltn-element": "0.0.7",
     "bson": "~4.7.2",
     "lit": "^2.7.2",
     "socket.io-client": "^4.6.1",
