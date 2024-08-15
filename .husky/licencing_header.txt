@@ -13,16 +13,3 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
-import { LtnLogLevel } from '@lighten/ltn-element';
-
-export interface Settings {
-  [index: string]: string | undefined | string[] | LtnLogLevel;
-
-  endpoint?: string;
-  token?: string;
-  apiPath?: string;
-  userId?: string;
-  coreSchema?: string[];
-  logLevel?: LtnLogLevel;
-};
