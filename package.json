@@ -1,8 +1,8 @@
 {
   "name": "@buttress/crag",
   "description": "Webcomponent buttress-db-service following open-wc recommendations",
-  "license": "MIT",
-  "author": "buttress-db-service",
+  "license": "AGPL-3.0-or-later",
+  "author": "Data People Connected LTD",
   "version": "0.0.15",
   "main": "./dist/src/index.js",
   "module": "./dist/src/index.js",
@@ -15,13 +15,15 @@
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
     "build": "tsc && npm run analyze -- --exclude dist",
     "watch": "tsc --watch --preserveWatchOutput",
+    "licence-check": "./.husky/licence-check",
     "prepublish": "tsc && npm run analyze -- --exclude dist",
     "lint": "eslint --ext .ts,.html . --ignore-path .gitignore && prettier \"**/*.ts\" --check --ignore-path .gitignore",
     "format": "eslint --ext .ts,.html . --fix --ignore-path .gitignore && prettier \"**/*.ts\" --write --ignore-path .gitignore",
     "test": "tsc && wtr --coverage",
     "test:watch": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wtr --watch\"",
     "storybook": "tsc && npm run analyze -- --exclude dist && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds -c .storybook/server.mjs\"",
-    "storybook:build": "tsc && npm run analyze -- --exclude dist && build-storybook"
+    "storybook:build": "tsc && npm run analyze -- --exclude dist && build-storybook",
+    "prepare": "husky"
   },
   "dependencies": {
     "@lighten/ltn-element": "0.0.6",
@@ -35,14 +37,14 @@
     "@custom-elements-manifest/analyzer": "^0.8.0",
     "@open-wc/eslint-config": "^10.0.0",
     "@open-wc/testing": "^3.1.8",
+    "@types/node": "^18.15.11",
     "@typescript-eslint/eslint-plugin": "^5.58.0",
     "@typescript-eslint/parser": "^5.58.0",
-    "@types/node": "^18.15.11",
     "@web/test-runner": "^0.15.3",
     "concurrently": "^8.0.1",
     "eslint": "^8.38.0",
     "eslint-config-prettier": "^8.8.0",
-    "husky": "^8.0.3",
+    "husky": "^9.1.4",
     "lint-staged": "^13.2.1",
     "prettier": "^2.8.7",
     "tslib": "^2.5.0",
@@ -60,9 +62,7 @@
     ],
     "rules": {
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": [
-        "error"
-      ],
+      "@typescript-eslint/no-unused-vars": 2,
       "import/no-unresolved": "off",
       "import/extensions": [
         "error",
