@@ -12,18 +12,19 @@
     ".": {
       "types": "./development/index.d.ts",
       "development": "./development/index.js",
-      "default": "./development/index.js"
+      "default": "./index.js"
     },
-    "./buttress-db-service.js": {
+    "./components/buttress-db-service.js": {
       "types": "./development/components/buttress-db-service.d.ts",
       "development": "./development/components/buttress-db-service.js",
-      "default": "./development/components/buttress-db-service.js"
+      "default": "./components/buttress-db-service.js"
     }
   },
   "scripts": {
     "analyze": "cem analyze --litelement",
+    "clean": "rimraf development dist components types ./ButtressDataService.* ./ButtressDbService.* ./ButtressRealtime.* ./ButtressSchema.* ./ButtressSchemaFactory.* ./ButtressStore.* ./helpers.* ./index.* test-app-token.json tsconfig.tsbuildinfo",
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
-    "build": "rimraf development tsconfig.tsbuildinfo && tsc --build --pretty",
+    "build": "rimraf development tsconfig.tsbuildinfo && tsc --build --pretty & cp -R development/* .",
     "roll": "rimraf dist && rollup -c rollup.config.mjs",
     "watch": "tsc --watch --preserveWatchOutput",
     "licence-check": "./.husky/licence-check",
@@ -34,10 +35,21 @@
     "test:watch": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wtr --watch\"",
     "storybook": "tsc && npm run analyze -- --exclude dist && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds -c .storybook/server.mjs\"",
     "storybook:build": "tsc && npm run analyze -- --exclude dist && build-storybook",
+    "package": "cp -R development/* . && rm -rf test",
+    "prepublishOnly": "npm run test && npm run package",
     "prepare": "husky"
   },
   "files": [
-    "/development/",
+    "/components/*.{js,d.ts}",
+    "/types/*.{js,d.ts}",
+    "ButtressDataService.{js,d.ts}",
+    "ButtressDbService.{js,d.ts}",
+    "ButtressRealtime.{js,d.ts}",
+    "ButtressSchema.{js,d.ts}",
+    "ButtressSchemaFactory.{js,d.ts}",
+    "ButtressStore.{js,d.ts}",
+    "helpers.{js,d.ts}",
+    "index.{js,d.ts}",
     "/LICENSE"
   ],
   "dependencies": {

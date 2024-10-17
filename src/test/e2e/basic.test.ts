@@ -18,7 +18,7 @@ import { html } from 'lit';
 import { fixture, expect } from '@open-wc/testing';
 
 import { ButtressDbService } from '@buttress/crag';
-import '@buttress/crag/buttress-db-service.js';
+import '@buttress/crag/components/buttress-db-service.js';
 
 describe('ButtressDbService', () => {
   let db: ButtressDbService;

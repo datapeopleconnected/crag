@@ -23,7 +23,20 @@ development/
 .rollup.cache
 tsconfig.tsbuildinfo
 
+/components/*
+/types/*
+/ButtressDataService.*
+/ButtressDbService.*
+/ButtressRealtime.*
+/ButtressSchema.*
+/ButtressSchemaFactory.*
+/ButtressStore.*
+/helpers.*
+/index.*
+
 storybook-static
 custom-elements.json
 
 test-app-token.json
+
+

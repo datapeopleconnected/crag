@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 
 const ENDPOINT = 'https://test.local.buttressjs.com';
-const TOKEN = 'Zg8NMRURk4k1x8tQoQJgUg4NMpRQx0xZNw8V';
+const TOKEN = 'splIFZxM44YpM9QUdI98NsoAZhIggocFA1IN';
 
 const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) => {
   let url = `${ENDPOINT}/api/v1/${path}`;

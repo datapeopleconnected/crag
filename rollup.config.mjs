@@ -16,7 +16,7 @@ export default {
     'development/index.js',
   ], // Entry point
   output: {
-    dir: ".",
+    dir: "./dist",
     exports: "named",
     preserveModules: false,
     format: 'es',
