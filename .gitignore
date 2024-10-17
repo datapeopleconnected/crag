@@ -19,6 +19,11 @@ coverage/
 _site/
 dist/
 out-tsc/
+development/
+.rollup.cache
+tsconfig.tsbuildinfo
 
 storybook-static
 custom-elements.json
+
+test-app-token.json

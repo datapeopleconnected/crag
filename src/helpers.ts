@@ -26,3 +26,23 @@ export interface Settings {
   coreSchema?: string[];
   logLevel?: LtnLogLevel;
 };
+
+export function Camelize(str: string, upper?: boolean): string {
+  return str.replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => index === 0 && !upper ? word.toLowerCase() : word.toUpperCase()).replace(/\s+/g, '');
+};
+export function Dasherize(str: string): string {
+  return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+export function DateCreate(date: string | number | Date): Date {
+  return new Date(date);
+};
+export function DateIsEqual(date: Date, compare: Date): boolean {
+  return date.getTime() === compare.getTime();
+}
+export function DateIsBefore(date: Date, compare: Date): boolean {
+  return date < compare;
+}
+export function DateIsAfter(date: Date, compare: Date): boolean {
+  return date > compare;
+}

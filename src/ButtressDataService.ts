@@ -16,13 +16,12 @@
 
 import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
 import { ObjectId } from 'bson';
-import Sugar from 'sugar';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, IndexSplice, ButtressEntity } from './ButtressStore.js';
 
-import { Settings } from './helpers.js';
+import { Settings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
 
 export interface QueryResult {
   skip?: number,
@@ -46,6 +45,7 @@ export interface QueryOpts {
   sort?: SortOpts
   project?: any
   bust?: boolean
+  actualCount?: boolean
 }
 
 export default class ButtressDataService implements ButtressStoreInterface {
@@ -86,7 +86,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this.path = this.name;
 
-    this.__route = this.path.split('-').map((part) => Sugar.String.dasherize(part)).join('/');
+    this.__route = this.path.split('-').map((part) => Dasherize(part)).join('/');
 
     this._logger = new LtnLogger(`buttress-data-service-${name}`);
 
@@ -290,6 +290,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
       const pathToEntity = path.splice(0, 2).join('.');
       const item = this._store.get(pathToEntity);
 
+      // What if the entity doesn't exist?
+      if (!item) {
+        throw new Error('Unable to process data change, entity doesn\'t exist in local store.');
+      }
+
       if (isAddition) {
         // Addition to a base object
         this.__generateAddRequest(item)
@@ -347,7 +352,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     await this.search(buttressQuery, opts);
 
     // Fetch the total results count from buttress as the query maybe paged.
-    const total = await this.count(buttressQuery);
+    const total = await this.count(buttressQuery, opts?.actualCount);
 
     return this.__filterLocalData(buttressQuery, {
       limit: opts?.limit,
@@ -460,38 +465,38 @@ export default class ButtressDataService implements ButtressStoreInterface {
       $elMatch: (rhs: any) => (lhs: any) => this.__processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
       $gtDate: (rhs: any) => {
         if (rhs === null) return false;
-        const rhsDate = Sugar.Date.create(rhs);
+        const rhsDate = DateCreate(rhs);
 
         return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
-          return Sugar.Date.isBefore(rhsDate, val);
+          return DateIsBefore(rhsDate, val);
         }) !== -1;
       },
       $ltDate: (rhs: any) => {
         if (rhs === null) return false;
-        const rhsDate = Sugar.Date.create(rhs);
+        const rhsDate = DateCreate(rhs);
 
         return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
-          return Sugar.Date.isAfter(rhsDate, val);
+          return DateIsAfter(rhsDate, val);
         }) !== -1;
       },
       $gteDate: (rhs: any) => {
         if (rhs === null) return false;
-        const rhsDate = Sugar.Date.create(rhs);
+        const rhsDate = DateCreate(rhs);
 
         return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
-          return Sugar.Date.isBefore(rhsDate, val) || Sugar.Date.is(rhsDate, val);
+          return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
         }) !== -1;
       },
       $lteDate: (rhs: any) => {
         if (rhs === null) return false;
-        const rhsDate = Sugar.Date.create(rhs);
+        const rhsDate = DateCreate(rhs);
 
         return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
-          return Sugar.Date.isAfter(rhsDate, val) || Sugar.Date.is(rhsDate, val);
+          return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
         }) !== -1;
       }
     };
@@ -525,8 +530,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
     // Filter out any objects which exists in the local store
-    const filteredBody = body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
-    this._store.set(this.name, new Map([...this.get(this.name), ...filteredBody.map((o: any) => [o.id, o])]), {
+    // const filteredBody =body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
+    const newMapArrMap: [string, ButtressEntity][] = [];
+
+    for (const o of body) {
+      // Check to see if o.id exsits within newMapArrMap, if it does merge them
+      const idx = newMapArrMap.findIndex((n) => n[0] === o.id);
+      if (idx !== -1) {
+        newMapArrMap[idx] = [o.id, {...newMapArrMap[idx][1], ...o}];
+        continue;
+      } else if (!this._store.get(`${this.name}.${o.id}`)) {
+        newMapArrMap.push([o.id, o]);
+        continue;
+      }
+
+      console.log('We have a update toe the existing datastore.');
+    }
+
+    this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
       silent: true
     });
     this._queryMap.push(`${hash}`);
@@ -534,8 +555,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return body;
   }
 
-  async count(buttressQuery: any): Promise<number> {
-    return this.__generateCountRequest(buttressQuery);
+  async count(buttressQuery: any, actualCount?: boolean): Promise<number> {
+    return this.__generateCountRequest(buttressQuery, actualCount);
   }
 
   _hashQuery(object: any) {
@@ -545,7 +566,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (str.length === 0) return hash;
     for (let i = 0; i < str.length; i += 1) {
         hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash = hash & hash; // Convert to 32bit integer
+        // hash = hash & hash; // Convert to 32bit integer
+        hash &= hash; // Convert to 32bit integer
     }
 
     return hash;
@@ -594,7 +616,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     });
   }
 
-  private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: undefined | BJSSortOpt, project: any): Promise<ButtressEntity[]> {
+  private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: undefined | BJSSortOpt = undefined, project: any = undefined): Promise<ButtressEntity[]> {
     return this.__queueRequest({
       type: 'search',
       url: this.getUrl(),
@@ -619,13 +641,14 @@ export default class ButtressDataService implements ButtressStoreInterface {
     });
   }
 
-  private __generateCountRequest(query: any): Promise<number> {
+  private __generateCountRequest(query: any, actualCount: boolean = false): Promise<number> {
     return this.__queueRequest({
       type: 'count',
       url: this.getUrl('count'),
       method: 'SEARCH',
       body: {
         query,
+        actualCount,
       },
     });
   }
