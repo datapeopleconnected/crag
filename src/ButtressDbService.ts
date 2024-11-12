@@ -33,6 +33,7 @@ export interface customButtressStoreInterface extends ButtressStoreInterface {
 }
 
 export class ButtressDbService extends LtnService {
+  static is = 'buttress-db-service';
   // @property({ type: String, attribute: false }) endpoint = "hello";
   // private _endpoint: String = "hello";asd
 
@@ -326,11 +327,11 @@ export class ButtressDbService extends LtnService {
     return ds.query(buttressQuery, opts);
   }
 
-  async count(dataService: string, buttressQuery: any) {
+  async count(dataService: string, buttressQuery: any, actualCount?: boolean) {
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error('Unable to subscribe to path, data service doesn\'t exist');
 
-    return ds.count(buttressQuery);
+    return ds.count(buttressQuery, actualCount);
   }
 
   _resolveDataServiceFromPath(path: string): ButtressDataService | undefined {

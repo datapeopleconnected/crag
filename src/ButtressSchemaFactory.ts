@@ -15,11 +15,12 @@
  */
 
 import {ObjectId} from 'bson';
-import Sugar from 'sugar';
 
 import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
 
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
+
+import { DateCreate } from './helpers.js';
 
 export class ButtressSchemaFactory {
   static create(primarySchema: ButtressSchema, path: string) {
@@ -44,7 +45,6 @@ export class ButtressSchemaFactory {
     let res;
     // 🤨
     switch ((config.__type as unknown as string)) {
-      default:
       case 'boolean':
         res = config.__default !== undefined ? config.__default : false;
         break;
@@ -73,10 +73,14 @@ export class ButtressSchemaFactory {
         if (config.__default === null) {
           res = null;
         } else if (config.__default) {
-          res = Sugar.Date.create(config.__default);
+          res = DateCreate(config.__default);
         } else {
           res = new Date();
         }
+        break;
+      default:
+        res = config.__default !== undefined ? config.__default : false;
+        break;
     }
     return res;
   }
