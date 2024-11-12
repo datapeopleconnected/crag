@@ -33,6 +33,7 @@ tsconfig.tsbuildinfo
 /ButtressStore.*
 /helpers.*
 /index.*
+/test
 
 storybook-static
 custom-elements.json
