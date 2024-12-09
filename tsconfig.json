@@ -1,21 +1,22 @@
 {
   "compilerOptions": {
-    "target": "es2018",
+    "target": "es2021",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noEmitOnError": true,
-    "lib": ["es2017", "dom"],
+    "lib": ["es2017", "DOM", "DOM.Iterable"],
     "strict": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
     "importHelpers": true,
-    "outDir": "dist",
+    "outDir": "./development/",
+    "rootDir": "./src",
     "sourceMap": true,
     "inlineSources": true,
-    "rootDir": "./",
     "declaration": true,
+    "declarationMap": true,
     "incremental": true
   },
-  "include": ["**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

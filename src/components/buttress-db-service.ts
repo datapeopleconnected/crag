@@ -16,4 +16,4 @@
 
 import { ButtressDbService } from '../ButtressDbService.js';
 
-customElements.define('buttress-db-service', ButtressDbService);
+customElements.define(ButtressDbService.is, ButtressDbService);

@@ -15,13 +15,12 @@
  */
 
 import {io} from 'socket.io-client';
-import Sugar from 'sugar';
 
 import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
 
 import {customButtressStoreInterface} from "./ButtressDbService.js";
 
-import {Settings} from './helpers.js';
+import {Settings, Camelize} from './helpers.js';
 
 interface PathParts {
   collectionName: string,
@@ -199,7 +198,7 @@ export default class ButtressDataRealtime {
     //   response.__readonly__ = true;
     // }
 
-    const pathSpec = data.pathSpec.split('/').map((ps: string) => Sugar.String.camelize(ps, false)).filter((s: string) => s && s !== '');
+    const pathSpec = data.pathSpec.split('/').map((ps: string) => Camelize(ps, false)).filter((s: string) => s && s !== '');
     const path = data.path.split('/').filter((s: string) => s && s !== '');
     const paramsRegex = /:(([a-z]|[A-Z]|[0-9]|[-])+)(?:\(.*?\))?$/;
 
