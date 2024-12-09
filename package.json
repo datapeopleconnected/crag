@@ -24,7 +24,7 @@
     "analyze": "cem analyze --litelement",
     "clean": "rimraf development dist components types ./ButtressDataService.* ./ButtressDbService.* ./ButtressRealtime.* ./ButtressSchema.* ./ButtressSchemaFactory.* ./ButtressStore.* ./helpers.* ./index.* test-app-token.json tsconfig.tsbuildinfo",
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
-    "build": "rimraf development tsconfig.tsbuildinfo && tsc --build --pretty & cp -R development/* .",
+    "build": "rimraf development tsconfig.tsbuildinfo && tsc --build --pretty && cp -R development/* .",
     "roll": "rimraf dist && rollup -c rollup.config.mjs",
     "watch": "tsc --watch --preserveWatchOutput",
     "licence-check": "./.husky/licence-check",
