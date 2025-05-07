@@ -373,7 +373,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     try {
-      data = this.__processQueryPart(buttressQuery, arr);
+      data = this._processQueryPart(buttressQuery, arr);
     } catch (err) {
       this._logger.error('Query was:', this.query);
       throw err;
@@ -417,19 +417,19 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return bVal.localeCompare(aVal);
   }
 
-  private __processQueryPart(query: any, data: Array<any>) {
+  _processQueryPart(query: any, data: Array<any>) {
     let output = data.slice(0);
 
     for (const field of Object.keys(query)) {
       if (field === '$and') {
         // eslint-disable-next-line no-loop-func
         query[field].forEach((o: any) => {
-          output = this.__processQueryPart(o, output);
+          output = this._processQueryPart(o, output);
         });
       } else if (field === '$or') {
         output = query[field]
           // eslint-disable-next-line no-loop-func
-          .map((o: any) => this.__processQueryPart(o, output))
+          .map((o: any) => this._processQueryPart(o, output))
           .reduce((combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)), []);
       } else {
         const command = query[field];
@@ -444,30 +444,54 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // eslint-disable-next-line class-methods-use-this
   private __parsePath(obj: any, path: string) {
-    const value = this._store.get(path, obj);
+    let value = this._store.get(path, obj);
+    value = (value)? value : this.__recursivePathLookUp(obj, path);
     return Array.isArray(value) ? value : [value];
   }
 
+  private __recursivePathLookUp = (root: any, path: string) => {
+    const parts = path.toString().split('.');
+
+    const helper = (current: any, remainingParts: string[]): any[] | string | undefined => {
+        if (!current || remainingParts.length === 0) return current;
+
+        const [currentPart, ...restParts] = remainingParts;
+
+        if (current instanceof Map) {
+            return helper(current.get(currentPart), restParts);
+        } else if (typeof current === 'object' && Array.isArray(current)) {
+            const results = current.map(item => helper(item, [currentPart, ...restParts])).flat().filter((v) => v);
+            return results.length > 0 ? results : undefined;
+        } else if (typeof current === 'object') {
+            return helper(current[currentPart], restParts);
+        }
+
+        return undefined;
+    };
+
+    return helper(root, parts);
+  };
+
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
     const fns: {[key: string]: Function} = {
-      $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val !== rhs) !== -1,
-      $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val === rhs) !== -1,
-      $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val > rhs) !== -1,
-      $lt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val < rhs) !== -1,
-      $gte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val >= rhs) !== -1,
-      $lte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val <= rhs) !== -1,
-      $rex: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => (new RegExp(rhs)).test(val)) !== -1,
-      $rexi: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => (new RegExp(rhs, 'i')).test(val)) !== -1,
-      $in: (rhs: any) => (lhs: any) => (Array.isArray(lhs[field])) ? lhs[field].some((v: any) => rhs.indexOf(v) !== -1) : rhs.indexOf(lhs[field]) !== -1,
-      $nin: (rhs: any) => (lhs: any) => (Array.isArray(lhs[field])) ? lhs[field].some((v: any) => rhs.indexOf(v) !== -1) === false : rhs.indexOf(lhs[field]) === -1,
-      $exists: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex(val => val === undefined) === -1 === rhs,
+      $not: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val !== rhs) !== -1,
+      $eq: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val === rhs) !== -1,
+      $gt: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val > rhs) !== -1,
+      $lt: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val < rhs) !== -1,
+      $gte: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val >= rhs) !== -1,
+      $lte: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val <= rhs) !== -1,
+      $rex: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => (new RegExp(rhs)).test(val)) !== -1,
+      $rexi: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => (new RegExp(rhs, 'i')).test(val)) !== -1,
+      $in: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).some((v) => rhs.indexOf(v) !== -1),
+      $nin: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).every((v) => rhs.indexOf(v) === -1),
+      $exists: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val === rhs) !== -1,
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
-      $elMatch: (rhs: any) => (lhs: any) => this.__processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
+      $elMatch: (rhs: any) => (lhs: any) => (this._processQueryPart(rhs, this.__parsePath(lhs, field))).length > 0,
       $gtDate: (rhs: any) => {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
+        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
           return DateIsBefore(rhsDate, val);
         }) !== -1;
@@ -476,7 +500,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
+        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
           return DateIsAfter(rhsDate, val);
         }) !== -1;
@@ -485,7 +509,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
+        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
           return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
         }) !== -1;
@@ -494,7 +518,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => this.__parsePath(lhs, field).findIndex(val => {
+        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
           if (val === null) return false; // Dont compare against null value
           return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
         }) !== -1;
