@@ -198,6 +198,7 @@ export default class ButtressDataRealtime {
     //   response.__readonly__ = true;
     // }
 
+    const schemaName = data.schemaName;
     const pathSpec = data.pathSpec.split('/').map((ps: string) => Camelize(ps, false)).filter((s: string) => s && s !== '');
     const path = data.path.split('/').filter((s: string) => s && s !== '');
     const paramsRegex = /:(([a-z]|[A-Z]|[0-9]|[-])+)(?:\(.*?\))?$/;
@@ -212,8 +213,8 @@ export default class ButtressDataRealtime {
       }
     }
 
-    if (path.length > 0 && !this._store.get(`${path[0]}`)) {
-      this._logger.debug(`__parsePayload: No data service for ${path[0]}`);
+    if (path.length > 0 && !this._store.get(`${schemaName}`)) {
+      this._logger.debug(`__parsePayload: No data service for ${schemaName}`);
       return; // We don't have a data service for this data
     }
 
@@ -226,20 +227,20 @@ export default class ButtressDataRealtime {
 
     if (data.verb === 'post') {
       if (pathStr.includes('bulk/update')) {
-        this._handlePut(pathParts, response);
+        this._handlePut(schemaName, pathParts, response);
       } else if (pathStr.includes('bulk/delete')) {
-        this._handleDelete(pathParts, response, true);
+        this._handleDelete(schemaName, pathParts, response, true);
       } else {
-        this._handlePost(pathParts, response);
+        this._handlePost(schemaName, pathParts);
       }
     } else if (data.verb === 'put') {
-      this._handlePut(pathParts, response);
+      this._handlePut(schemaName, pathParts, response);
     } else if (data.verb === 'delete') {
-      this._handleDelete(pathParts, response, false, data.isBulkDelete);
+      this._handleDelete(schemaName, pathParts, response, false, data.isBulkDelete);
     }
   }
 
-  private _handlePut(pathParts: PathParts, response: any) {
+  private _handlePut(schemaName: string, pathParts: PathParts, response: any) {
     this._logger.debug(`_handlePut: start`);
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
 
@@ -247,14 +248,14 @@ export default class ButtressDataRealtime {
       const isBulk = (responses[x].id && responses[x].results);
 
       if (isBulk) {
-        responses[x].results.forEach((res: any) => this._update(pathParts, responses[x].id, res));
+        responses[x].results.forEach((res: any) => this._update(schemaName, pathParts, responses[x].id, res));
       } else {
-        this._update(pathParts, pathParts.id, responses[x]);
+        this._update(schemaName, pathParts, pathParts.id, responses[x]);
       }
     }
   }
 
-  private _handleDelete(pathParts: PathParts, response:any, isBulk: boolean = false, clear: boolean = false) {
+  private _handleDelete(schemaName: string, pathParts: PathParts, response:any, isBulk: boolean = false, clear: boolean = false) {
     this._logger.debug(`_handleDelete: start`);
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
 
@@ -263,17 +264,17 @@ export default class ButtressDataRealtime {
     } else if (isBulk) {
       // TODO: Need to get list of the ids that have been deleted from buttress
       for (let x = 0; x < responses.length; x += 1) {
-        const entity = this._store.get(`${pathParts.collectionName}.${responses[x].id}`);
+        const entity = this._store.get(`${schemaName}.${responses[x].id}`);
         if (entity) {
-          this._store.delete(pathParts.collectionName, responses[x].id, {
+          this._store.delete(schemaName, responses[x].id, {
             localOnly: true
           });
         }
       };
     } else if (pathParts.id) { // DeleteSingle
-      const entity = this._store.get(`${pathParts.collectionName}.${pathParts.id}`);
+      const entity = this._store.get(`${schemaName}.${pathParts.id}`);
       if (entity) {
-        this._store.delete(pathParts.collectionName, pathParts.id, {
+        this._store.delete(schemaName, pathParts.id, {
           localOnly: true
         });
       }
@@ -282,25 +283,25 @@ export default class ButtressDataRealtime {
     this._logger.debug(`_handleDelete: end`);
   }
   
-  private _handlePost(pathParts: PathParts, response: any) {
+  private _handlePost(schemaName: string, response: any) {
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
     this._logger.debug(`_handlePost: start`, responses);
 
     for (let x = 0; x < responses.length; x += 1) {
-      const entity = this._store.get(`${pathParts.collectionName}.${responses[x].id}`);
+      const entity = this._store.get(`${schemaName}.${responses[x].id}`);
       if (entity) return; // Skip as it already exists
 
-      this._store.set(`${pathParts.collectionName}.${responses[x].id}`, response, {
+      this._store.set(`${schemaName}.${responses[x].id}`, response, {
         localOnly: true
       });
     }
   }
 
-  private async _update(pathParts: PathParts, id: string, response:any) {
-    const updatePath = this._getUpdatePath(pathParts.collectionName, id, response.path);
+  private async _update(schemaName: string, pathParts: PathParts, id: string, response:any) {
+    const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (typeof(updatePath) === 'boolean') {
-      await this._store.get(pathParts.collectionName, id);
+      await this._store.get(schemaName, id);
       return;
     }
 
