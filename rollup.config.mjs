@@ -6,6 +6,7 @@ export default {
   input: [
     'development/components/buttress-db-service.js',
     'development/test/e2e/basic.test.js',
+    'development/test/unit/basic.test.js',
     'development/ButtressDataService.js',
     'development/ButtressDbService.js',
     'development/ButtressRealtime.js',
