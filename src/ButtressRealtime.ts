@@ -231,7 +231,7 @@ export default class ButtressDataRealtime {
       } else if (pathStr.includes('bulk/delete')) {
         this._handleDelete(schemaName, pathParts, response, true);
       } else {
-        this._handlePost(schemaName, pathParts);
+        this._handlePost(schemaName, response);
       }
     } else if (data.verb === 'put') {
       this._handlePut(schemaName, pathParts, response);
