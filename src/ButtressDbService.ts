@@ -106,6 +106,11 @@ export class ButtressDbService extends LtnService {
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
     this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
+
+    this.addEventListener('load-missing-entity', (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      this.getById(detail.schemaName, detail.id);
+    });
   }
 
   disconnectedCallback() {
