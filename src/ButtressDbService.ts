@@ -107,6 +107,7 @@ export class ButtressDbService extends LtnService {
     this._settings.userId = this.userId;
     this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
 
+    // TODO debounce bulk event triggers?
     this.addEventListener('load-missing-entity', (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
       this.getById(detail.schemaName, detail.id);
