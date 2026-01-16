@@ -301,7 +301,7 @@ export default class ButtressDataRealtime {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (updatePath === false) {
-      this._dispatchCustomEvent('load-missing-entity', {
+      this._dispatchCustomEvent('dataservice:loadById', {
         detail: {
           schemaName,
           id,
