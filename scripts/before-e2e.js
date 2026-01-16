@@ -17,7 +17,11 @@
 import fs from 'node:fs';
 
 const ENDPOINT = 'https://test.local.buttressjs.com';
-const TOKEN = 'splIFZxM44YpM9QUdI98NsoAZhIggocFA1IN';
+const TOKEN = process.env.BUTTRESS_TEST_SUPER_TOKEN;
+
+if (!TOKEN) {
+  throw new Error('BUTTRESS_TEST_SUPER_TOKEN environment variable is not set.');
+}
 
 const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) => {
   let url = `${ENDPOINT}/api/v1/${path}`;
@@ -32,6 +36,10 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
   });
 
   if (!res.ok) {
+
+    // Why did it fail?
+    const errorText = await res.text();
+    console.error(`Error response from ${method} ${url}: ${res.status} ${res.statusText} - ${errorText}`);
     throw new Error(`Failed to ${method} ${url}`);
   }
 
@@ -69,6 +77,7 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
 
   const policies = [{
     "name": "policy-test-1",
+    "version": 1,
     "selection": {
       "policyTest": {
         "@gte": 1
@@ -95,6 +104,7 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
     ]
   }, {
     "name": "policy-test-2",
+    "version": 1,
     "selection": {
       "policyTest": {
         "@gte": 2
@@ -115,7 +125,7 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
         },
         "query": {
           "number": {
-            $gte: 50
+            "@gte": 50
           }
         }
       }
