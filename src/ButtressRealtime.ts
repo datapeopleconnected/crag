@@ -231,7 +231,7 @@ export default class ButtressDataRealtime {
       } else if (pathStr.includes('bulk/delete')) {
         this._handleDelete(schemaName, pathParts, response, true);
       } else {
-        this._handlePost(schemaName, pathParts);
+        this._handlePost(schemaName, response);
       }
     } else if (data.verb === 'put') {
       this._handlePut(schemaName, pathParts, response);
@@ -300,8 +300,15 @@ export default class ButtressDataRealtime {
   private async _update(schemaName: string, pathParts: PathParts, id: string, response:any) {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
-    if (typeof(updatePath) === 'boolean') {
-      await this._store.get(schemaName, id);
+    if (updatePath === false) {
+      this._dispatchCustomEvent('dataservice:loadById', {
+        detail: {
+          schemaName,
+          id,
+        },
+        bubbles: true,
+        composed: true
+      });
       return;
     }
 

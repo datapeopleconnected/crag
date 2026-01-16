@@ -106,6 +106,12 @@ export class ButtressDbService extends LtnService {
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
     this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
+
+    // TODO debounce bulk event triggers?
+    this.eventSubscribe('dataservice:loadById', (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      this.getById(detail.schemaName, detail.id);
+    });
   }
 
   disconnectedCallback() {
