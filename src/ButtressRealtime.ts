@@ -18,7 +18,7 @@ import {io} from 'socket.io-client';
 
 import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
 
-import {customButtressStoreInterface} from "./ButtressDbService.js";
+import {customButtressStoreInterface, EventDataDataServiceLoadById} from "./ButtressDbService.js";
 
 import {Settings, Camelize} from './helpers.js';
 
@@ -305,7 +305,7 @@ export default class ButtressDataRealtime {
         detail: {
           schemaName,
           id,
-        },
+        } as EventDataDataServiceLoadById,
         bubbles: true,
         composed: true
       });
