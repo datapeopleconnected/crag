@@ -3,7 +3,7 @@
   "description": "Webcomponent buttress-db-service following open-wc recommendations",
   "license": "AGPL-3.0-or-later",
   "author": "Data People Connected LTD",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "type": "module",
   "main": "./development/index.js",
   "module": "./development/index.js",
