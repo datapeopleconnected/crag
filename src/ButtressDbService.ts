@@ -32,6 +32,11 @@ export interface customButtressStoreInterface extends ButtressStoreInterface {
   clearQueryMap: Function,
 }
 
+export interface EventDataDataServiceLoadById {
+  schemaName: string,
+  id: string,
+};
+
 export class ButtressDbService extends LtnService {
   static is = 'buttress-db-service';
   // @property({ type: String, attribute: false }) endpoint = "hello";
@@ -108,8 +113,7 @@ export class ButtressDbService extends LtnService {
     this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
 
     // TODO debounce bulk event triggers?
-    this.eventSubscribe('dataservice:loadById', (ev: Event) => {
-      const detail = (ev as CustomEvent).detail;
+    this.eventSubscribe('dataservice:loadById', (detail: EventDataDataServiceLoadById) => {
       this.getById(detail.schemaName, detail.id);
     });
   }
