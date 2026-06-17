@@ -22,7 +22,9 @@ import ButtressSchema from '../../ButtressSchema';
 
 describe('processQueryPart', () => {
   const store = new ButtressStore();
-  const ds = new ButtressDataService('Unit Testing', false, {}, store, {} as ButtressSchema)
+  const ds = new ButtressDataService('Unit Testing', false, {
+    
+  }, store, {} as ButtressSchema)
   const data = [
     {
       "publicLedger": {

@@ -152,7 +152,7 @@ export default class ButtressDataRealtime {
       }
     }
 
-    if (this._settings?.userId !== payload.data.user || payload.isSameApp === false) {
+    if (this._settings.clientSessionId !== payload.data.clientSessionId || payload.isSameApp === false) {
       this._parsePayload(payload.data);
     }
 

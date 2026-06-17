@@ -13,11 +13,14 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
+import { v4 as uuidv4 } from 'uuid';
 
 import { LtnLogLevel } from '@lighten/ltn-element';
 
 export interface Settings {
   [index: string]: string | undefined | string[] | LtnLogLevel;
+
+  clientSessionId: string;
 
   endpoint?: string;
   token?: string;
@@ -26,6 +29,17 @@ export interface Settings {
   coreSchema?: string[];
   logLevel?: LtnLogLevel;
 };
+
+export function buildSettings(settings: Partial<Settings>): Settings {
+  if (settings.clientSessionId) {
+    return settings as Settings;
+  }
+
+  return {
+    ...settings,
+    clientSessionId: uuidv4()
+  };
+}
 
 export function Camelize(str: string, upper?: boolean): string {
   return str.replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => index === 0 && !upper ? word.toLowerCase() : word.toUpperCase()).replace(/\s+/g, '');

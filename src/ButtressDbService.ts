@@ -13,7 +13,6 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 import { html } from 'lit';
 import { property } from 'lit/decorators.js';
 import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
@@ -26,7 +25,7 @@ import ButtressRealtime from './ButtressRealtime.js';
 import ButtressSchema from './ButtressSchema.js';
 import {ButtressSchemaFactory} from './ButtressSchemaFactory.js';
 
-import { Settings } from './helpers.js';
+import { Settings, buildSettings } from './helpers.js';
 
 export interface customButtressStoreInterface extends ButtressStoreInterface {
   clearQueryMap: Function,
@@ -61,7 +60,7 @@ export class ButtressDbService extends LtnService {
 
   private _realtime: ButtressRealtime;
 
-  private _settings: Settings = {};
+  private _settings: Settings;
 
   private _schema: {[key: string]: ButtressSchema} | null = null;
 
@@ -75,6 +74,8 @@ export class ButtressDbService extends LtnService {
 
   constructor() {
     super();
+
+    this._settings = buildSettings({});
 
     const dispatchCustomEvent = (type: string, options: Event) => this.dispatchCustomEvent(type, options);
 

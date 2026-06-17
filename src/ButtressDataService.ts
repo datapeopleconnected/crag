@@ -13,7 +13,6 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
 import { ObjectId } from 'bson';
 
@@ -21,7 +20,7 @@ import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, IndexSplice, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
+import { Settings, buildSettings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
 
 export interface QueryResult {
   skip?: number,
@@ -79,10 +78,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   bundlingChunk: number = 100;
 
-  constructor(name: string, core: boolean, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
+  constructor(name: string, core: boolean, settings: Partial<Settings>, store: ButtressStore, schema: ButtressSchema) {
     this.name = name;
     this.core = core;
-    this._settings = settings;
+    this._settings = buildSettings(settings);
 
     this.path = this.name;
 
@@ -771,6 +770,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this._settings.token}`,
+          'x-client-session-id': this._settings.clientSessionId || '',
         },
         body,
       })
@@ -790,6 +790,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
       this._logger.error(err);
 
       if (request.reject && !Array.isArray(request.reject)) request.reject(err);
+      if (request.reject && Array.isArray(request.reject)) request.reject.forEach((rq: any) => rq(err));
       this.status = 'error';
     } finally {
       this.__updateQueue();
