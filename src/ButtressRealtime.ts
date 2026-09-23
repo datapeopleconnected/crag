@@ -282,16 +282,20 @@ export default class ButtressDataRealtime {
 
     this._logger.debug(`_handleDelete: end`);
   }
-  
+
   private _handlePost(schemaName: string, response: any) {
     const responses: Array<any> = (Array.isArray(response)) ? response : [response];
     this._logger.debug(`_handlePost: start`, responses);
 
     for (let x = 0; x < responses.length; x += 1) {
-      const entity = this._store.get(`${schemaName}.${responses[x].id}`);
-      if (entity) return; // Skip as it already exists
-
-      this._store.set(`${schemaName}.${responses[x].id}`, response, {
+      const existing = this._store.get(`${schemaName}.${responses[x].id}`);
+      if (existing) {
+        this._store.set(`${schemaName}.${responses[x].id}`, { ...existing, ...responses[x] }, {
+          localOnly: true
+        });
+        continue;
+      }
+      this._store.set(`${schemaName}.${responses[x].id}`, responses[x], {
         localOnly: true
       });
     }
