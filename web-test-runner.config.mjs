@@ -19,7 +19,7 @@ try {
 }
 
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
-  files: 'dist/*.test.js',
+  files: '.test-bundle/*.test.js',
   plugins: [
     importMapsPlugin({ inject: {
       importMap: {

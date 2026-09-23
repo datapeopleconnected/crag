@@ -4,7 +4,7 @@ import { esbuildPlugin } from '@web/dev-server-esbuild';
 const filteredLogs = ['Running in dev mode', 'lit-html is in dev mode'];
 
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
-  files: 'test/unit/*.test.js',
+  files: 'dist/test/unit/*.test.js',
   plugins: [
     importMapsPlugin({ inject: {
       importMap: {
