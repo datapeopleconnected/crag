@@ -557,17 +557,17 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const newMapArrMap: [string, ButtressEntity][] = [];
 
     for (const o of body) {
-      // Check to see if o.id exsits within newMapArrMap, if it does merge them
       const idx = newMapArrMap.findIndex((n) => n[0] === o.id);
       if (idx !== -1) {
         newMapArrMap[idx] = [o.id, {...newMapArrMap[idx][1], ...o}];
         continue;
-      } else if (!this._store.get(`${this.name}.${o.id}`)) {
+      }
+      const existing = this._store.get(`${this.name}.${o.id}`);
+      if (!existing) {
         newMapArrMap.push([o.id, o]);
         continue;
       }
-
-      console.log('We have a update toe the existing datastore.');
+      newMapArrMap.push([o.id, {...existing, ...o}]);
     }
 
     this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
