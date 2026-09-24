@@ -19,13 +19,7 @@ import { ButtressRequestQueue } from './ButtressRequestQueue.js';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
-import {
-  ButtressStore,
-  NotifyChangeOpts,
-  ButtressStoreInterface,
-  IndexSplice,
-  ButtressEntity,
-} from './ButtressStore.js';
+import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
 import { Settings, buildSettings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
 
@@ -104,8 +98,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._store = store;
 
     this._store.set(this.name, new Map());
-
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
   }
 
   setLogLevel(level: LogLevel) {
@@ -197,11 +189,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // Queues a write's requests, unless its options keep it from Buttress, and settles dboComplete once they have.
   private __send(opts: NotifyChangeOpts | undefined, requests: () => Promise<unknown>[]) {
-    const sent = opts?.localOnly || opts?.silent || opts?.forceChanged ? [] : requests();
+    const sent = ButtressDataService.__sends(opts) ? requests() : [];
     Promise.all(sent).then(
       () => opts?.dboComplete?.resolve(),
       (err) => opts?.dboComplete?.reject(err),
     );
+  }
+
+  private static __sends(opts?: NotifyChangeOpts): boolean {
+    return !opts?.localOnly && !opts?.silent && !opts?.forceChanged;
+  }
+
+  // Objects added to an array get an id, as Buttress expects of them.
+  private static __giveIds(items: any[]) {
+    items.forEach((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item) && !item.id) {
+        item.id = ButtressSchemaFactory.getObjectId();
+      }
+    });
   }
 
   // The data service settles dboComplete itself, so the store mustn't also resolve it.
@@ -212,125 +217,59 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   push(path: string, ...items: any[]): number {
-    return this._store.push(path, this._schema, ...items);
+    return this.pushExt(path, undefined, ...items);
   }
 
   pushExt(path: string, opts?: NotifyChangeOpts, ...items: any[]): number {
-    return this._store.pushExt(path, this._schema, opts, ...items);
+    if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const length = this._store.pushExt(path, this._schema, ButtressDataService.__storeOpts(opts), ...items);
+
+    const [, id, ...arrayPath] = path.split('.');
+    this.__send(opts, () => items.map((item) => this.__generateUpdateRequest(id, arrayPath.join('.'), item)));
+
+    return length;
   }
 
+  // splice(path, start) removes to the end, as Array.prototype.splice does.
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
-    if (arguments.length < 3) return this._store.splice(path, this._schema, start);
-
-    return this._store.splice(path, this._schema, start, deleteCount, ...items);
+    return this.spliceExt(path, start, deleteCount, undefined, ...items);
   }
 
   spliceExt(path: string, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] {
-    return this._store.spliceExt(path, this._schema, start, deleteCount, opts, ...items);
+    const before = this._store.get(path);
+    const length = Array.isArray(before) ? before.length : 0;
+    // Counted as Array.prototype.splice counts it, so the requests use the index the store spliced at.
+    const from = Math.trunc(start) || 0;
+    const index = from < 0 ? Math.max(length + from, 0) : Math.min(from, length);
+
+    if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const removed = this._store.spliceExt(
+      path,
+      this._schema,
+      index,
+      deleteCount,
+      ButtressDataService.__storeOpts(opts),
+      ...items,
+    );
+
+    const [, id, ...rest] = path.split('.');
+    const arrayPath = rest.join('.');
+    this.__send(opts, () => {
+      // Each remove shifts the items after it down, so every one is at the same index.
+      if (items.length === 0)
+        return removed.map(() => this.__generateUpdateRequest(id, `${arrayPath}.${index}.__remove__`, ''));
+      if (removed.length === 0 && index === length) {
+        return items.map((item) => this.__generateUpdateRequest(id, arrayPath, item));
+      }
+      // Buttress can only append to an array or remove from it, so anything else sends the whole array.
+      return [this.__generateUpdateRequest(id, arrayPath, [...this._store.get(path)])];
+    });
+
+    return removed;
   }
 
   notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
     return this._store.notifyPath(path, value, opts);
-  }
-
-  _processDataChange(cr: any): void {
-    if (/\.length$/.test(cr.path) === true) {
-      return;
-    }
-
-    if (/__(\w+)__/.test(cr.path)) {
-      this._logger.debug(`Ignoring internal change: ${cr.path}`);
-      return;
-    }
-
-    if (cr.opts?.localOnly) {
-      this._logger.debug(`Ignoring localOnly change: ${cr.path}`);
-      return;
-    }
-
-    this._logger.debug(cr);
-
-    const path = cr.path.split('.');
-    // set, create and delete send their own requests. Only changes to arrays inside entities are sent from here.
-    if (!/\.splices$/.test(cr.path) || path.length < 4) return;
-
-    const entity = this._store.get(path.slice(0, 2).join('.'));
-
-    this._logger.debug(entity);
-
-    this._logger.debug('Child array mutation', cr);
-    this._logger.debug('Index Splices: ', cr.value.indexSplices?.length);
-    this._logger.debug('Key Splices: ', cr.value.keySplices?.length);
-
-    if (cr.value.indexSplices?.length > 0) {
-      cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
-        if (indexSplice.opts?.localOnly) {
-          this._logger.debug(`Ignoring localOnly change to indexSplice: ${cr.path}`);
-          return;
-        }
-
-        const o = indexSplice.object[indexSplice.index];
-        if (indexSplice.addedCount > 0) {
-          // Remove datastore entity prefix
-          path.splice(0, 2);
-          // Remove .splices
-          path.splice(-1, 1);
-          if (typeof o === 'object' && !o.id) {
-            o.id = ButtressSchemaFactory.getObjectId();
-          }
-
-          this.__generateUpdateRequest(entity.id, path.join('.'), o)
-            .then(() => {
-              if (cr.opts?.dboComplete) {
-                cr.opts.dboComplete.resolve();
-              }
-            })
-            .catch((err) => {
-              if (cr.opts?.dboComplete) {
-                cr.opts.dboComplete.reject(err);
-              }
-            });
-        } else if (indexSplice.removed.length > 0) {
-          if (indexSplice.removed.length > 1) {
-            this._logger.debug('Index splice removed.length > 1', indexSplice.removed);
-          } else {
-            path.splice(0, 2);
-            path.splice(-1, 1);
-            path.push(indexSplice.index);
-            path.push('__remove__');
-
-            this.__generateUpdateRequest(entity.id, path.join('.'), '')
-              .then(() => {
-                if (cr.opts?.dboComplete) {
-                  cr.opts.dboComplete.resolve();
-                }
-              })
-              .catch((err) => {
-                if (cr.opts?.dboComplete) {
-                  cr.opts.dboComplete.reject(err);
-                }
-              });
-          }
-        }
-      });
-    } else if (cr.value.keySplices) {
-      this._logger.debug('Key Splices: ', cr.value.keySplices);
-      // cr.value.keySplices.forEach((k, idx) => {
-      //   k.removed.forEach(() => {
-      //     const itemIndex = cr.value.indexSplices[idx].index;
-      //     this._logger.debug(itemIndex);
-
-      //     path.splice(0, 2); // drop the prefix
-      //     path.splice(-1, 1); // drop the .splices
-      //     path.push(itemIndex); // add the correct index
-
-      //     // path.push(k.replace('#', ''));
-      //     path.push('__remove__'); // add the remove command
-      //     this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
-      //     // this.__generateUpdateRequest(entity.id, path.join('.'), '');
-      //   });
-      // });
-    }
   }
 
   updateSchema(schema: ButtressSchema) {
@@ -671,7 +610,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this._queue.push({ type: 'add', method: 'POST', url: this.getUrl(), entityId: entity.id, body: entity });
   }
 
-  private __generateUpdateRequest(entityId: string, path: string, value: string | number): Promise<void> {
+  private __generateUpdateRequest(entityId: string, path: string, value: unknown): Promise<void> {
     return this._queue.push({
       type: 'update',
       method: 'PUT',

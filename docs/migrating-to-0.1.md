@@ -284,6 +284,10 @@ realtime updates whose `data.clientSessionId` matches.
     an error that could stop other subscribers hearing about other changes. It now does nothing;
   - deleting an entity that isn't in the store threw an error. It now does nothing and returns `false`;
   - `dboComplete` was never called for `localOnly`, `silent` or `forceChanged` writes. It's now called straight away.
+- **`push` and `splice` send the whole change.** They used to send only the first added item, or a single removed
+  item, and the rest changed the store without reaching Buttress. `push` now sends every item, a `splice` that removes
+  several items sends every removal, and a `splice` that inserts before the end, or removes and adds, sends the whole
+  array. Every added object is given an `id`, not only the first.
 - **Requests for the same entity reach Buttress in order.** crag sends adds and deletes ahead of other requests, and
   combines adds or updates into bulk requests. That could send a delete ahead of an earlier update to the same
   entity, so the update failed. It now never moves a request ahead of an earlier one for the same entity.

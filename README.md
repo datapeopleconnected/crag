@@ -169,9 +169,10 @@ any time.
 Before you write:
 
 - `set`, `push` and `splice` only work inside entities that are already in the store: queried, fetched or created.
-- Each `push` or `splice` call sends at most one change to Buttress: the first added item, or else a single removed
-  item. So push one item per call, remove one item per call, and don't add and remove in the same `splice`. Anything
-  else in the call changes the local store but isn't sent.
+- Buttress can append to an array and remove from it, but not insert into the middle. So `push`, and a `splice` that
+  only adds at the end, send each added item; a `splice` that only removes sends each removal; and any other `splice`
+  sends the whole new array, which overwrites any change someone else makes to that array at the same time.
+- Objects added to an array are given an `id` if they don't have one.
 - `create` and `delete` work on whole entities: `create` takes a schema name and `delete` takes `<schema>.<id>`.
 
 `create`, `set` and `delete` take these options:

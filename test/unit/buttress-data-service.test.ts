@@ -761,6 +761,114 @@ describe('ButtressDataService writes', () => {
     expect([local.outcome(), silent.outcome(), created.outcome()]).to.deep.equal(['resolved', 'resolved', 'resolved']);
   });
 
+  it('sends a push of several items as an update for each', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.tags', 'c', 'd');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'tags', value: 'c' } },
+      { method: 'PUT', path: '/x', body: { path: 'tags', value: 'd' } },
+    ]);
+  });
+
+  it('gives every pushed object an id', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.contacts', { phones: [] }, { phones: [] });
+    await settle(ds);
+
+    const ids = sent.map((r) => (r.body as { value: { id: string } }).value.id);
+    expect(ids).to.have.length(2);
+    expect(ids[0]).to.match(/^[0-9a-f]{24}$/);
+    expect(ids[1]).to.match(/^[0-9a-f]{24}$/);
+    expect(ds.get('organisation.x.contacts').map((c: { id: string }) => c.id)).to.deep.equal(['c1', ...ids]);
+  });
+
+  it('sends a splice removing several items as a remove for each', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 0, 2);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'tags.0.__remove__', value: '' } },
+      { method: 'PUT', path: '/x', body: { path: 'tags.0.__remove__', value: '' } },
+    ]);
+    expect(ds.get('organisation.x.tags')).to.deep.equal([]);
+  });
+
+  it('sends a splice counting from the end as a remove at the index it reached', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', -1, 1);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags.1.__remove__', value: '' } }]);
+  });
+
+  it('sends a splice adding at the end as an update that appends each item', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 2, 0, 'c');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags', value: 'c' } }]);
+  });
+
+  it('sends the whole array for a splice that inserts before the end', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 1, 0, 'm');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags', value: ['a', 'm', 'b'] } }]);
+  });
+
+  it('sends the whole array for a splice that removes and adds', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 0, 1, 'z');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags', value: ['z', 'b'] } }]);
+  });
+
+  it('sends nothing for a splice that changes nothing', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 1, 0);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('sends a push and then a delete of the same entity in one go', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.tags', 'c');
+    ds.delete('x');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'tags', value: 'c' } },
+      { method: 'DELETE', path: '/x', body: undefined },
+    ]);
+  });
+
+  it('resolves dboComplete for a push or splice once Buttress accepts it', async () => {
+    const ds = withEntity();
+    const pushed = tracked();
+    const spliced = tracked();
+
+    ds.pushExt('organisation.x.tags', { dboComplete: pushed.dboComplete }, 'c');
+    ds.spliceExt('organisation.x.tags', 0, 1, { dboComplete: spliced.dboComplete });
+    await settle(ds);
+
+    expect([pushed.outcome(), spliced.outcome()]).to.deep.equal(['resolved', 'resolved']);
+  });
+
   it('rejects dboComplete when Buttress rejects the write', async () => {
     const ds = withEntity();
     const { dboComplete, outcome } = tracked();
