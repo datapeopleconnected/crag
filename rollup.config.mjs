@@ -41,7 +41,11 @@ export default {
   plugins: [
     stripTypes,
     nodeResolve({
-      browser: true
+      browser: true,
+      // Always bundle packages' production builds, whatever NODE_ENV says. Unless one of these conditions is listed,
+      // node-resolve picks 'development' when NODE_ENV is set to anything but 'production', and socket.io-parser's
+      // development build imports the CommonJS `debug` package, which can't be bundled here.
+      exportConditions: ['production'],
     })
   ],
 };
