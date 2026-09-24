@@ -141,7 +141,7 @@ any time.
 | Method                                | Description                                                                                                                |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `connect(): Promise<void>`            | Loads the schemas, creates the data services, then opens the realtime socket. Rejects if `endpoint`, `token` or `api-path` is missing. |
-| `awaitConnection(): Promise<boolean>` | Resolves once `connect()` has loaded the schemas. Can be called before `connect()`.                                        |
+| `awaitConnection(): Promise<boolean>` | Resolves once `connect()` has loaded the schemas. Can be called before `connect()`. Rejects with the same error if that `connect()` fails; called after a failure, it waits for the next `connect()`. |
 | `isDbConnected(): boolean`            | Whether the schemas have loaded.                                                                                           |
 
 ### Reading

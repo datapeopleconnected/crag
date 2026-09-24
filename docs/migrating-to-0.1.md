@@ -255,6 +255,8 @@ realtime updates whose `data.clientSessionId` matches.
 - **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
   connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
   reload what you're showing. Entities already in the store keep their values until a query fetches them again.
+- **`awaitConnection()` rejects when `connect()` fails.** It used to wait until a later `connect()` succeeded, or
+  forever if none did. It now rejects with the same error, so catch it where you await it.
 - **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
   request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
   Buttress has responded to every request, including any queued while it waits.
