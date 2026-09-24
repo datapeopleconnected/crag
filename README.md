@@ -382,6 +382,10 @@ apart from HTML and JSON, must start with the header in `.husky/licencing_header
 
 `npm pack` and `npm publish` build the package first. Run `npm run publint` beforehand to check its exports and types.
 
+## Security
+
+Please report vulnerabilities privately, as [SECURITY.md](SECURITY.md) explains, not in a public issue.
+
 ## Licence
 
 Buttress Crag is free software, released under the [GNU Affero General Public Licence v3.0 or later](LICENSE).
