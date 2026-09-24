@@ -87,7 +87,7 @@
     "rimraf": "^5.0.10",
     "rollup": "^2.79.2",
     "stylelint": "^17.15.0",
-    "typescript": "^5.0.4",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.1"
   },
   "devEngines": {
