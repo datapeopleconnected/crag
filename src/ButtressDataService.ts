@@ -151,7 +151,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this._store.notifyPath(path, value, opts);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   _processDataChange(cr: any) : void {
     if (/\.length$/.test(cr.path) === true) {
       return;
@@ -421,13 +420,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     for (const field of Object.keys(query)) {
       if (field === '$and') {
-        // eslint-disable-next-line no-loop-func
         query[field].forEach((o: any) => {
           output = this._processQueryPart(o, output);
         });
       } else if (field === '$or') {
         output = query[field]
-          // eslint-disable-next-line no-loop-func
           .map((o: any) => this._processQueryPart(o, output))
           .reduce((combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)), []);
       } else {
@@ -441,7 +438,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return output;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __parsePath(obj: any, path: string) {
     let value = this._store.get(path, obj);
     value = (value)? value : this.__recursivePathLookUp(obj, path);
@@ -711,7 +707,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
     });
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __reduceRequests() {
     this.status = 'working';
 

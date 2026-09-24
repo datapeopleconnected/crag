@@ -365,13 +365,11 @@ export class ButtressStore implements ButtressStoreInterface {
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __propertiesChanged(changedProps: MapAny) {
     let ran = false;
 
     this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
 
-    // eslint-disable-next-line no-multi-assign
     const id = dedupeId += 1;
     for (const prop of Object.keys(changedProps)) {
       const rootProperty = (prop.indexOf('.') === -1) ? prop : prop.slice(0, prop.indexOf('.'));
@@ -438,14 +436,12 @@ export class ButtressStore implements ButtressStoreInterface {
     return values;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __pathMatchesTrigger(path: string, trigger: PathSig): boolean {
     return (!trigger) || (trigger.name === path) ||
       !!(trigger.structured && trigger.name.indexOf(`${path}.`) === 0) ||
       !!(trigger.wildcard && path.indexOf(`${trigger.name}.`) === 0);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   subscribe(pathsStr: string, fn: CRCallback): string {
     const id = uuidv4();
     this.__logger.debug('subscribe', pathsStr);
@@ -486,7 +482,6 @@ export class ButtressStore implements ButtressStoreInterface {
     return result;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __parsePath(path: string): PathSig {
     const p: PathSig = {
       name: path.trim(),

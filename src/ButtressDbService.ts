@@ -201,7 +201,6 @@ export class ButtressDbService extends LitElement {
     this._connected = true;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private _bjsRequest(method: string, path: string, token: string, body?: any, headers?: { [key: string]: string }, queryString?: any) {
     const qs = new URLSearchParams({urq: Date.now(), ...queryString});
 
@@ -229,7 +228,7 @@ export class ButtressDbService extends LitElement {
       const body = await response.json();
       this._schema = body.reduce((obj: {[key: string]: ButtressSchema}, schema: ButtressSchema) => {
         const schemaName = (schema.core) ? this._stripTrailingS(schema.name) : schema.name;
-        obj[schemaName] = schema; // eslint-disable-line no-param-reassign
+        obj[schemaName] = schema;
         return obj;
       }, {});
       this._logger.debug(body);
@@ -304,27 +303,22 @@ export class ButtressDbService extends LitElement {
     return this._dsStoreInterface.delete(schema, id, opts);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   get<T extends ButtressEntity>(path: string): T | undefined {
     return this._dsStoreInterface.get(path);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
     return this._dsStoreInterface.set(path, value, opts);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   push(path: string, ...items: any[]): number {
     return this._dsStoreInterface.push(path, ...items);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
     return this._dsStoreInterface.splice(path, start, deleteCount, ...items);
   }
 
-  // eslint-disable-next-line class-methods-use-this
   subscribe(path: string, cb: CRCallback): string {
     return this._store.subscribe(path, cb);
   }
@@ -451,7 +445,6 @@ export class ButtressDbService extends LitElement {
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this
   _stripTrailingS(word: string): string {
     const lastLetter = word.slice(-1);
     let output = word;
@@ -525,7 +518,6 @@ export class ButtressDbService extends LitElement {
     }
   }
 
-  // eslint-disable-next-line class-methods-use-this
   async addSchema(apiPath: string, schema: any) {
     const {endpoint, token} = this._settings;
 

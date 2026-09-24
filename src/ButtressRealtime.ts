@@ -130,7 +130,6 @@ export default class ButtressDataRealtime {
     });
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private _handleRxEvent(type:string, payload: any) {
     this._logger.debug(`RX Event type:${type} `, payload);
     if (type === 'db-connect-room') {
@@ -167,7 +166,6 @@ export default class ButtressDataRealtime {
     this._lastSequence[payload.room] = payload.sequence;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private async _loadAccessControlData(payload: any) {
     const userId = this._settings?.userId;
     const apiPath = this._settings?.apiPath;
@@ -183,7 +181,6 @@ export default class ButtressDataRealtime {
     this._lastSequence[payload.room] = 0;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private async _clearAccessControlQueryHash(payload: any) {
     const userId = this._settings?.userId;
     const apiPath = this._settings?.apiPath;
@@ -199,7 +196,6 @@ export default class ButtressDataRealtime {
     this._lastSequence[payload.room] = 0;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private _parsePayload(data: any) {
     const {response} = data;
     // if (response && typeof response === 'object') {
