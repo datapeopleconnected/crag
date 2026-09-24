@@ -43,6 +43,8 @@ export default class ButtressDataRealtime {
 
   private _dispatchCustomEvent: Function;
 
+  private _loadById: (detail: EventDataDataServiceLoadById) => void;
+
   private _isConnected: boolean = false;
 
   private readonly _rxEvents: string[] = [
@@ -52,13 +54,19 @@ export default class ButtressDataRealtime {
     'db-disconnect-room',
   ];
 
-  constructor(store: customButtressStoreInterface, settings: Settings, dispatchCustomEvent: Function) {
+  constructor(
+    store: customButtressStoreInterface,
+    settings: Settings,
+    dispatchCustomEvent: Function,
+    loadById: (detail: EventDataDataServiceLoadById) => void,
+  ) {
     this._store = store;
     this._settings = settings;
 
     this._logger = new LtnLogger('buttress-data-realtime');
 
     this._dispatchCustomEvent = dispatchCustomEvent;
+    this._loadById = loadById;
   }
 
   connect() {
@@ -305,14 +313,13 @@ export default class ButtressDataRealtime {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (updatePath === false) {
+      const detail: EventDataDataServiceLoadById = { schemaName, id };
       this._dispatchCustomEvent('dataservice:loadById', {
-        detail: {
-          schemaName,
-          id,
-        } as EventDataDataServiceLoadById,
+        detail,
         bubbles: true,
         composed: true
       });
+      this._loadById(detail);
       return;
     }
 

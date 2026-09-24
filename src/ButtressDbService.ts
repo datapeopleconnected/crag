@@ -13,11 +13,12 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import { html } from 'lit';
+import { LitElement, css, html } from 'lit';
 import { property } from 'lit/decorators.js';
-import { LtnService, LtnLogLevel } from '@lighten/ltn-element';
-// import { LtnSettingsService, ButtressSettings } from './LtnSettingsService.js';
+import { ContextProvider } from '@lit/context';
+import { LtnLogger, LtnLogLevel, LtnLogLevelStrings } from '@lighten/ltn-element';
 
+import { buttressDbServiceContext } from './context.js';
 import ButtressDataService, { QueryOpts } from './ButtressDataService.js';
 import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts, CRCallback} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
@@ -36,8 +37,15 @@ export interface EventDataDataServiceLoadById {
   id: string,
 };
 
-export class ButtressDbService extends LtnService {
+export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
+
+  static styles = css`
+    :host {
+      display: contents;
+    }
+  `;
+
   // @property({ type: String, attribute: false }) endpoint = "hello";
   // private _endpoint: String = "hello";asd
 
@@ -55,6 +63,14 @@ export class ButtressDbService extends LtnService {
 
   @property({type: Array, attribute: 'core-schema'})
   coreSchema?: Array<string>;
+
+  @property({type: String})
+  logLevel: string = 'info';
+
+  private _logger: LtnLogger = new LtnLogger(this.tagName.toLowerCase());
+
+  // Descendants get this element with @consume({ context: buttressDbServiceContext }).
+  private _contextProvider = new ContextProvider(this, { context: buttressDbServiceContext, initialValue: this });
 
   private _store: ButtressStore;
 
@@ -77,7 +93,12 @@ export class ButtressDbService extends LtnService {
 
     this._settings = buildSettings({});
 
-    const dispatchCustomEvent = (type: string, options: Event) => this.dispatchCustomEvent(type, options);
+    const dispatchCustomEvent = (type: string, init: CustomEventInit) => this.dispatchEvent(new CustomEvent(type, init));
+
+    // TODO debounce bulk event triggers?
+    // Realtime calls this directly rather than through a DOM listener, so a nested
+    // <buttress-db-service>'s bubbling 'dataservice:loadById' event isn't handled here too.
+    const loadById = (detail: EventDataDataServiceLoadById) => this.getById(detail.schemaName, detail.id);
 
     // Route through the dataservices
     // const self = this;
@@ -101,27 +122,39 @@ export class ButtressDbService extends LtnService {
     this._store = new ButtressStore();
 
     // TODO: Pass through data service catpure 
-    this._realtime = new ButtressRealtime(this._dsStoreInterface, this._settings, dispatchCustomEvent);
+    this._realtime = new ButtressRealtime(this._dsStoreInterface, this._settings, dispatchCustomEvent, loadById);
   }
 
   connectedCallback(): void {
     super.connectedCallback();
+    this._initLogger();
 
     this._settings.endpoint = this.endpoint;
     this._settings.token = this.token;
     this._settings.apiPath = this.apiPath;
     this._settings.userId = this.userId;
     this._settings.coreSchema = (this.coreSchema && this.coreSchema.length > 0) ? this.coreSchema : [];
-
-    // TODO debounce bulk event triggers?
-    this.eventSubscribe('dataservice:loadById', (detail: EventDataDataServiceLoadById) => {
-      this.getById(detail.schemaName, detail.id);
-    });
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    this._debug(`disconnectedCallback`);
+    this._logger.debug(`disconnectedCallback`);
+  }
+
+  private _initLogger() {
+    const logLevel = this.logLevel?.toUpperCase() as LtnLogLevelStrings;
+    if (typeof LtnLogLevel[logLevel] === 'number') {
+      this._setLogLevel(LtnLogLevel[logLevel]);
+    }
+
+    const logLabel = this.getAttribute('log-label');
+    if (logLabel !== null) {
+      this._logger.label = logLabel.toLowerCase();
+    }
+
+    if (this.getAttribute('log-disable') !== null) {
+      this._logger.disable = true;
+    }
   }
 
   isDbConnected(): boolean {
@@ -185,7 +218,7 @@ export class ButtressDbService extends LtnService {
   }
 
   private async _fetchAppSchema() {
-    this._debug('_fetchAppSchema', this._settings);
+    this._logger.debug('_fetchAppSchema', this._settings);
     if (!this._settings) return;
 
     const token = this._settings.token || '';
@@ -199,7 +232,7 @@ export class ButtressDbService extends LtnService {
         obj[schemaName] = schema; // eslint-disable-line no-param-reassign
         return obj;
       }, {});
-      this._debug(body);
+      this._logger.debug(body);
     } else {
       throw new Error(
         `Buttress Error: ${response.status}: ${response.statusText}`
@@ -238,13 +271,13 @@ export class ButtressDbService extends LtnService {
 
     await new Promise((r) => this._awaitConnectionPool.push(r));
 
-    this._debug('awaited');
+    this._logger.debug('awaited');
 
     return true;
   }
 
   protected _setLogLevel(level: LtnLogLevel) {
-    super._setLogLevel(level);
+    this._logger.level = level;
 
     this._settings.logLevel = level;
 
@@ -553,6 +586,6 @@ export class ButtressDbService extends LtnService {
   }
 
   render() {
-    return html``;
+    return html`<slot></slot>`;
   }
 }

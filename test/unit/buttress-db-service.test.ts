@@ -1,0 +1,111 @@
+/**
+ * Buttress Crag
+ * Copyright (C) 2016-2024 Data People Connected LTD.
+ * <https://www.dpc-ltd.com/>
+ *
+ * This file is part of Buttress Crag.
+ * Buttress Crag is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public Licence as published by the Free Software
+ * Foundation, either version 3 of the Licence, or (at your option) any later version.
+ * Buttress Crag is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU Affero General Public Licence for more details.
+ * You should have received a copy of the GNU Affero General Public Licence along with
+ * this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import { expect, fixture } from '@open-wc/testing';
+import { html, LitElement } from 'lit';
+import { consume } from '@lit/context';
+
+import '../../src/components/buttress-db-service.js';
+import { ButtressDbService } from '../../src/ButtressDbService.js';
+import { buttressDbServiceContext } from '../../src/context.js';
+
+class DbConsumer extends LitElement {
+  @consume({ context: buttressDbServiceContext })
+  db?: ButtressDbService;
+}
+customElements.define('db-consumer', DbConsumer);
+
+// Assertions compare booleans and tag names, not elements: if an assertion with an element
+// as its expected value fails, the runner tries to serialise the element and times out.
+describe('ButtressDbService context', () => {
+  it('provides itself to descendants', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service>
+        <db-consumer></db-consumer>
+      </buttress-db-service>
+    `);
+    const consumer = el.querySelector<DbConsumer>('db-consumer');
+
+    expect(consumer?.db === el, 'consumer.db is the <buttress-db-service>').to.equal(true);
+  });
+
+  it('renders its children through a slot', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service>
+        <db-consumer></db-consumer>
+      </buttress-db-service>
+    `);
+    const slot = el.shadowRoot?.querySelector('slot');
+
+    expect(slot?.assignedElements().map((child) => child.localName)).to.deep.equal(['db-consumer']);
+  });
+});
+
+// Removing the element logs 'disconnectedCallback' at DEBUG level.
+describe('ButtressDbService logging', () => {
+  let messages: string[];
+  let originalDebug: typeof console.debug;
+
+  const disconnectedMessages = () => messages.filter((message) => message.includes('disconnectedCallback'));
+
+  beforeEach(() => {
+    messages = [];
+    originalDebug = console.debug;
+    console.debug = (...args: unknown[]) => {
+      messages.push(args.join(' '));
+    };
+  });
+
+  afterEach(() => {
+    console.debug = originalDebug;
+  });
+
+  it('logs debug messages when loglevel is debug', async () => {
+    const el = await fixture(html`
+      <buttress-db-service loglevel="debug"></buttress-db-service>
+    `);
+    el.remove();
+
+    expect(disconnectedMessages()).to.deep.equal(['[DEBUG] [buttress-db-service] disconnectedCallback']);
+  });
+
+  it('does not log debug messages at the default level', async () => {
+    const el = await fixture(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+    el.remove();
+
+    expect(disconnectedMessages()).to.deep.equal([]);
+  });
+
+  it('uses the log-label attribute as the label', async () => {
+    const el = await fixture(html`
+      <buttress-db-service loglevel="debug" log-label="My-Label"></buttress-db-service>
+    `);
+    el.remove();
+
+    expect(disconnectedMessages()).to.deep.equal(['[DEBUG] [my-label] disconnectedCallback']);
+  });
+
+  it('logs nothing when log-disable is set', async () => {
+    const el = await fixture(html`
+      <buttress-db-service loglevel="debug" log-disable></buttress-db-service>
+    `);
+    el.remove();
+
+    expect(disconnectedMessages()).to.deep.equal([]);
+  });
+});

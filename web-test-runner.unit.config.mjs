@@ -19,7 +19,10 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
     esbuildPlugin({ ts: true, tsconfig: 'tsconfig.json' })
   ],
 
-  /** Resolve bare module imports */
+  /**
+   * Resolve bare module imports. Don't also pass --node-resolve on the CLI: it replaces this
+   * object, and socket.io-client then resolves to its Node build (which imports `ws`).
+   */
   nodeResolve: {
     exportConditions: ['browser', 'development'],
     browser: true,

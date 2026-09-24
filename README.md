@@ -5,18 +5,60 @@ This webcomponent follows the [open-wc](https://github.com/open-wc/open-wc) reco
 ## Installation
 
 ```bash
-npm i buttress-db-service
+npm i @buttress/crag
 ```
 
 ## Usage
 
+Register the element and wrap the part of your app that uses the database in it:
+
 ```html
 <script type="module">
-  import 'buttress-db-service/buttress-db-service.js';
+  import '@buttress/crag/components/buttress-db-service.js';
 </script>
 
-<buttress-db-service></buttress-db-service>
+<buttress-db-service endpoint="https://buttress.example.com" token="..." api-path="my-app">
+  <my-app></my-app>
+</buttress-db-service>
 ```
+
+`<buttress-db-service>` provides itself to its descendants through [`@lit/context`](https://lit.dev/docs/data/context/).
+Consume it from any Lit element inside it:
+
+```ts
+import { LitElement } from 'lit';
+import { consume } from '@lit/context';
+import { ButtressDbService, buttressDbServiceContext } from '@buttress/crag';
+
+class OrganisationList extends LitElement {
+  @consume({ context: buttressDbServiceContext })
+  db?: ButtressDbService;
+
+  async firstUpdated() {
+    await this.db?.awaitConnection();
+    const organisations = await this.db?.query('organisation', {});
+  }
+}
+```
+
+`db` is set while the consumer connects, as long as `buttress-db-service` is already defined. If consumers can
+connect before it is, attach a `ContextRoot` from `@lit/context` to `document.body` so their requests are replayed
+once it upgrades. With TypeScript's `experimentalDecorators`, keep `useDefineForClassFields` set to `false`.
+
+## Migrating from 0.0.x
+
+`@lighten/ltn-element` is no longer a dependency: `ButtressDbService` extends `LitElement` and is found through context
+instead of the ltn service locator.
+
+- Replace `this._getService(ButtressDbService)` with a `@consume({ context: buttressDbServiceContext })` property, as
+  above.
+- Consumers must be descendants of `<buttress-db-service>`. Remove any `LtnTrader.registerService()` call for it: the
+  trader would now throw, as the element no longer has `_queryService()`.
+- `eventSubscribe()`, `eventUnsubscribe()` and `dispatchCustomEvent()` are gone. Listen for DOM events instead, e.g.
+  `db.addEventListener('bjs-connection-changed', (e) => ...)`, where `e.detail` is the connection state.
+- Also removed: the `scope` attribute, the `_debug()`/`_info()`/`_warn()`/`_error()`/`_sys()` helpers and the static
+  `generateId()`.
+- The `loglevel`, `log-label` and `log-disable` attributes work as before.
 
 ## Linting and formatting
 

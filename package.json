@@ -30,7 +30,7 @@
     "watch": "tsc --watch --preserveWatchOutput",
     "licence-check": "./.husky/licence-check",
     "test": "npm run build && npm run roll && npm run test:e2e",
-    "test:unit": "wtr --config web-test-runner.unit.config.mjs --node-resolve",
+    "test:unit": "wtr --config web-test-runner.unit.config.mjs",
     "test:e2e": "node ./scripts/before-e2e.js && wtr --node-resolve",
     "test:watch": "npm run test:unit -- --watch",
     "publint": "publint && attw --pack . --profile esm-only",
@@ -52,6 +52,7 @@
   ],
   "dependencies": {
     "@lighten/ltn-element": "0.0.7",
+    "@lit/context": "^1.1.6",
     "bson": "~6.8.0",
     "lit": "^2.7.2",
     "socket.io-client": "^4.6.1",
