@@ -141,7 +141,7 @@ any time.
 | Method                                | Description                                                                                                                |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `connect(): Promise<void>`            | Loads the schemas, creates the data services, then opens the realtime socket. Rejects if `endpoint`, `token` or `api-path` is missing. |
-| `awaitConnection(): Promise<boolean>` | Resolves once `connect()` has loaded the schemas. Can be called before `connect()`.                                        |
+| `awaitConnection(): Promise<boolean>` | Resolves once `connect()` has loaded the schemas. Can be called before `connect()`. Rejects with the same error if that `connect()` fails; called after a failure, it waits for the next `connect()`. |
 | `isDbConnected(): boolean`            | Whether the schemas have loaded.                                                                                           |
 
 ### Reading
@@ -299,7 +299,7 @@ passes through arrays can give several values, and an entity matches if any of t
 | `$nin`                                       | is not in the operand array. Every value must pass this one.               |
 | `$rex`, `$rexi`                              | matches the regular expression. `$rexi` ignores case.                      |
 | `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. `null` never matches. |
-| `$exists`                                    | equals the operand. Locally this is the same test as `$eq`.                |
+| `$exists`                                    | is present, even if `null`, when the operand is `true`; is missing when it's `false`. |
 | `$elMatch`                                   | is an array with an element that matches the sub-query                     |
 | `$inProp`                                    | contains the operand. Top-level properties only.                           |
 

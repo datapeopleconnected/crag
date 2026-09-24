@@ -106,7 +106,7 @@ export class ButtressDbService extends LitElement {
 
   private _connected: boolean = false;
 
-  private _awaitConnectionPool: Array<Function> = [];
+  private _awaitConnectionPool: Array<{ resolve: () => void; reject: (err: unknown) => void }> = [];
 
   // Set when the element is removed with the realtime socket open, so moving it in the DOM reopens the socket.
   private _reopenRealtime: boolean = false;
@@ -205,18 +205,24 @@ export class ButtressDbService extends LitElement {
   }
 
   async connect() {
-    if (!this._settings.endpoint) {
-      throw new Error(`Missing required setting 'endpoint'`);
-    }
-    if (!this._settings.token) {
-      throw new Error(`Missing required setting 'token'`);
-    }
-    if (!this._settings.apiPath) {
-      throw new Error(`Missing required setting 'apiPath'`);
-    }
-
     const wasInDocument = this.isConnected;
-    await this._connect();
+    try {
+      if (!this._settings.endpoint) {
+        throw new Error(`Missing required setting 'endpoint'`);
+      }
+      if (!this._settings.token) {
+        throw new Error(`Missing required setting 'token'`);
+      }
+      if (!this._settings.apiPath) {
+        throw new Error(`Missing required setting 'apiPath'`);
+      }
+
+      await this._connect();
+    } catch (err) {
+      // Otherwise anything awaiting the connection waits until a later connect() succeeds, or forever.
+      this._settleAwaitingConnection({ err });
+      throw err;
+    }
     // Removed while the schemas were loading: disconnectedCallback has already run, so nothing would close the socket.
     // Open it when the element is added back instead.
     if (wasInDocument && !this.isConnected) {
@@ -245,11 +251,15 @@ export class ButtressDbService extends LitElement {
 
     await this._refreshLocalDataServices();
 
-    for (let i = this._awaitConnectionPool.length - 1; i >= 0; i -= 1) {
-      this._awaitConnectionPool[i]();
-      this._awaitConnectionPool.splice(i, 1);
-    }
     this._connected = true;
+    this._settleAwaitingConnection();
+  }
+
+  // Resolves everything awaiting the connection, or rejects it with the failure's error.
+  private _settleAwaitingConnection(failure?: { err: unknown }) {
+    const waiting = this._awaitConnectionPool;
+    this._awaitConnectionPool = [];
+    waiting.forEach(({ resolve, reject }) => (failure ? reject(failure.err) : resolve()));
   }
 
   private _bjsRequest(
@@ -332,7 +342,9 @@ export class ButtressDbService extends LitElement {
   async awaitConnection(): Promise<boolean> {
     if (this._connected) return true;
 
-    await new Promise((r) => this._awaitConnectionPool.push(r));
+    await new Promise<void>((resolve, reject) => {
+      this._awaitConnectionPool.push({ resolve, reject });
+    });
 
     this._logger.debug('awaited');
 

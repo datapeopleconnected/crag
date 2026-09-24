@@ -304,3 +304,70 @@ describe('ButtressDbService resync', () => {
     expect(cleared).to.deep.equal(['organisation', 'person']);
   });
 });
+
+describe('ButtressDbService awaitConnection', () => {
+  let originalFetch: typeof window.fetch;
+  let status: number;
+
+  // Reports whether a promise has settled within a short wait.
+  const outcomeOf = (promise: Promise<unknown>) =>
+    Promise.race([
+      promise.then(
+        () => 'resolved',
+        () => 'rejected',
+      ),
+      new Promise((resolve) => {
+        setTimeout(() => resolve('pending'), 100);
+      }),
+    ]);
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    status = 500;
+    // Answers the schema request with an empty schema list, or an error while status is 500.
+    window.fetch = async () => new Response('[]', { status });
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const connectable = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    return el;
+  };
+
+  it('rejects when the schemas fail to load', async () => {
+    const el = await connectable();
+
+    const waiting = el.awaitConnection();
+    await el.connect().catch(() => {});
+
+    expect(await outcomeOf(waiting)).to.equal('rejected');
+  });
+
+  it('rejects when connect() is missing a setting', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+
+    const waiting = el.awaitConnection();
+    await el.connect().catch(() => {});
+
+    expect(await outcomeOf(waiting)).to.equal('rejected');
+  });
+
+  it('waits for the next connect() when called after a failure', async () => {
+    const el = await connectable();
+    await el.connect().catch(() => {});
+
+    const waiting = el.awaitConnection();
+    status = 200;
+    await el.connect();
+
+    expect(await outcomeOf(waiting)).to.equal('resolved');
+  });
+});

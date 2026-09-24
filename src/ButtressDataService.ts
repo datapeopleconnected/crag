@@ -519,7 +519,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
         this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs, 'i').test(val)) !== -1,
       $in: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).some((v) => rhs.indexOf(v) !== -1),
       $nin: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).every((v) => rhs.indexOf(v) === -1),
-      $exists: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
+      // As in MongoDB: present, even if null. __parsePath gives no values for an empty array, so check for one.
+      $exists: (rhs: any) => (lhs: any) => {
+        const exists =
+          this.__parsePath(lhs, field).some((val) => val !== undefined) || Array.isArray(this._store.get(field, lhs));
+        return rhs ? exists : !exists;
+      },
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
       $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
       $gtDate: (rhs: any) => {
