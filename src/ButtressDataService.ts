@@ -15,6 +15,7 @@
  */
 import { Logger, LogLevel } from './Logger.js';
 import { ButtressClient } from './ButtressClient.js';
+import { ButtressRequestQueue } from './ButtressRequestQueue.js';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
@@ -62,15 +63,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _logger: Logger;
 
-  readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
-
   private _store: ButtressStore;
 
   private _schema: ButtressSchema;
 
   private _settings: Settings;
 
-  private _client: ButtressClient;
+  private _queue: ButtressRequestQueue;
 
   // The ids each search returned, in the server's order, keyed by __queryKey().
   private _queryCache: Map<string, { ids: string[]; paged: boolean; generation: number }> = new Map();
@@ -78,23 +77,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // Bumped by a create: cached pages from an earlier generation are searched for again.
   private __pageGeneration = 0;
 
-  private _requestQueue: Array<any> = [];
-
-  private __awaitIdleQueue: Array<(idle: boolean) => void> = [];
-
-  status: string = 'pending';
-
   core: boolean = false;
-
-  bundling: boolean = true;
-
-  bundlingChunk: number = 100;
 
   constructor(name: string, core: boolean, settings: Partial<Settings>, store: ButtressStore, schema: ButtressSchema) {
     this.name = name;
     this.core = core;
     this._settings = buildSettings(settings);
-    this._client = new ButtressClient(this._settings);
 
     this.path = this.name;
 
@@ -104,6 +92,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
       .join('/');
 
     this._logger = new Logger(`buttress-data-service-${name}`);
+
+    this._queue = new ButtressRequestQueue(
+      new ButtressClient(this._settings),
+      (type) => this.getUrl('bulk', type),
+      this._logger,
+    );
 
     this._schema = schema;
 
@@ -636,29 +630,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._queryCache.clear();
   }
 
-  private __updateQueue(): undefined {
-    if (this._requestQueue.length === 0) {
-      const waiting = this.__awaitIdleQueue;
-      this.__awaitIdleQueue = [];
-      waiting.forEach((resolve) => resolve(true));
-      return;
-    }
-    if (this.status === 'working') return;
-    // TODO: Debounce method
-    this.__reduceRequests();
-  }
-
-  async nextIdle(): Promise<boolean> {
-    return new Promise((r) => {
-      queueMicrotask(() => {
-        if (this._requestQueue.length === 0 && this.status !== 'working') {
-          r(true);
-          return;
-        }
-
-        this.__awaitIdleQueue.push(r);
-      });
-    });
+  nextIdle(): Promise<boolean> {
+    return this._queue.nextIdle();
   }
 
   // _generateListRequest(): Promise<void> {
@@ -670,11 +643,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // }
 
   private __generateGetByIdRequest(entityId: string): Promise<ButtressEntity> {
-    return this.__queueRequest({
-      type: 'get',
-      url: this.getUrl(entityId),
-      method: 'GET',
-    });
+    return this._queue.push({ type: 'get', method: 'GET', url: this.getUrl(entityId), entityId });
   }
 
   private __generateSearchRequest(
@@ -684,142 +653,39 @@ export default class ButtressDataService implements ButtressStoreInterface {
     sort: undefined | BJSSortOpt = undefined,
     project: any = undefined,
   ): Promise<ButtressEntity[]> {
-    return this.__queueRequest({
+    return this._queue.push({
       type: 'search',
-      url: this.getUrl(),
       method: 'SEARCH',
-      contentType: 'application/json',
-      body: {
-        query,
-        limit,
-        skip,
-        sort,
-        project,
-      },
+      url: this.getUrl(),
+      body: { query, limit, skip, sort, project },
     });
   }
 
   private __generateRmRequest(entityId: string) {
-    return this.__queueRequest({
-      type: 'delete',
-      url: this.getUrl(entityId),
-      entityId,
-      method: 'DELETE',
-    });
+    return this._queue.push({ type: 'delete', method: 'DELETE', url: this.getUrl(entityId), entityId });
   }
 
   private __generateCountRequest(query: any, actualCount: boolean = false): Promise<number> {
-    return this.__queueRequest({
+    return this._queue.push({
       type: 'count',
-      url: this.getUrl('count'),
       method: 'SEARCH',
-      body: {
-        query,
-        actualCount,
-      },
+      url: this.getUrl('count'),
+      body: { query, actualCount },
     });
   }
 
   private __generateAddRequest(entity: any) {
-    return this.__queueRequest({
-      type: 'add',
-      url: this.getUrl(),
-      entityId: -1,
-      method: 'POST',
-      contentType: 'application/json',
-      body: entity,
-    });
+    return this._queue.push({ type: 'add', method: 'POST', url: this.getUrl(), entityId: entity.id, body: entity });
   }
 
   private __generateUpdateRequest(entityId: string, path: string, value: string | number): Promise<void> {
-    return this.__queueRequest({
+    return this._queue.push({
       type: 'update',
+      method: 'PUT',
       url: this.getUrl(entityId),
       entityId,
-      method: 'PUT',
-      contentType: 'application/json',
-      body: {
-        path,
-        value,
-      },
+      body: { path, value },
     });
-  }
-
-  private __queueRequest(request: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      request.resolve = resolve;
-      request.reject = reject;
-
-      this._requestQueue.push(request);
-      this.__updateQueue();
-    });
-  }
-
-  private __reduceRequests() {
-    this.status = 'working';
-
-    // Prioritise additions & deletions
-    const requestIdx = this._requestQueue.findIndex((r) => r.type === 'add' || r.type === 'delete');
-    let request =
-      requestIdx !== -1 && this.bundling
-        ? this._requestQueue.splice(requestIdx, 1).shift()
-        : this._requestQueue.shift();
-
-    if (this.bundling && this.BUNDLED_REQUESTS_TYPES.includes(request.type)) {
-      this._logger.debug('bulk compatible request, trying to chunk:', request.type);
-
-      const requests = [
-        request,
-        ...this._requestQueue.filter((r) => r.type === request.type).splice(0, this.bundlingChunk - 1),
-      ];
-
-      if (requests.length > 1) {
-        this._requestQueue = this._requestQueue.filter((r) => !requests.includes(r));
-
-        request = {
-          type: `bulk/${request.type}`,
-          url: `${this.getUrl('bulk', request.type)}`,
-          entityId: -1,
-          method: 'POST',
-          contentType: 'application/json',
-          body: null,
-          dependentRequests: requests,
-          // Every bundled request settles with the bulk request.
-          resolve: requests.map((rq) => rq.resolve),
-          reject: requests.map((rq) => rq.reject),
-        };
-
-        if (request.type === 'bulk/update') {
-          request.body = requests.map((rq) => ({
-            id: rq.entityId,
-            body: rq.body,
-          }));
-        } else {
-          request.body = requests.map((rq) => rq.body);
-        }
-      }
-    }
-
-    // const request = this._requestQueue.shift();
-    return this.__generateRequest(request);
-  }
-
-  private async __generateRequest(request: any) {
-    try {
-      const data = await this._client.request(request.method, request.url, { body: request.body });
-      // Set once the body is read, so nextIdle() doesn't resolve before this request does.
-      this.status = 'done';
-      if (request.resolve && !Array.isArray(request.resolve)) request.resolve(data);
-      if (request.resolve && Array.isArray(request.resolve)) request.resolve.forEach((rq: any) => rq(data));
-    } catch (err) {
-      this._logger.error(err);
-
-      if (request.reject && !Array.isArray(request.reject)) request.reject(err);
-      if (request.reject && Array.isArray(request.reject)) request.reject.forEach((rq: any) => rq(err));
-      this.status = 'error';
-    } finally {
-      this.__updateQueue();
-    }
   }
 
   getUrl(...parts: string[]) {

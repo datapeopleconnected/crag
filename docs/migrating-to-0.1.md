@@ -275,6 +275,9 @@ realtime updates whose `data.clientSessionId` matches.
 - **`$exists` matches on whether the property is there.** Locally it used to be the same test as `$eq`, so
   `{ $exists: true }` only matched properties whose value was `true`. It now matches as Buttress does: `true` for a
   property that's present, even if it's `null`, and `false` for one that's missing.
+- **Requests for the same entity reach Buttress in order.** crag sends adds and deletes ahead of other requests, and
+  combines adds or updates into bulk requests. That could send a delete ahead of an earlier update to the same
+  entity, so the update failed. It now never moves a request ahead of an earlier one for the same entity.
 - **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
   request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
   Buttress has responded to every request, including any queued while it waits.

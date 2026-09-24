@@ -69,8 +69,8 @@ describe('ButtressDataService request queue', () => {
     Logger.disableLogging = true;
 
     // Holds the first request open so the requests after it queue up and get bundled.
-    window.fetch = (input: RequestInfo | URL) => {
-      requests.push(input.toString());
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(`${init?.method} ${new URL(input.toString()).pathname}`);
       const respond = () => new Response(status === 200 ? '[]' : '{"message":"nope"}', { status });
       if (requests.length > 1) return Promise.resolve(respond());
       return new Promise<Response>((resolve) => {
@@ -107,6 +107,28 @@ describe('ButtressDataService request queue', () => {
     expect(await outcomeOf(second)).to.equal('resolved');
     expect(await outcomeOf(third)).to.equal('resolved');
     expect(requests.some((url) => url.includes('/bulk/add'))).to.equal(true);
+  });
+
+  it('sends an update and then a delete of the same entity in that order', async () => {
+    const ds = dataService();
+    ds.get('organisation').set('x', { id: 'x', name: 'a' });
+
+    ds.getById('held');
+    ds.set('organisation.x.name', 'b');
+    // The update is only worked out when the store flushes, so it must flush before x is deleted from the store.
+    await flush();
+    ds.create({ id: 'y', name: 'y' });
+    ds.delete('x');
+    await flush();
+    releaseFirst();
+    await ds.nextIdle();
+
+    expect(requests).to.deep.equal([
+      'GET /api/v1/organisation/held',
+      'POST /api/v1/organisation/',
+      'PUT /api/v1/organisation/x',
+      'DELETE /api/v1/organisation/x',
+    ]);
   });
 
   it('rejects every create in a bulk add that fails', async () => {
@@ -172,7 +194,7 @@ describe('ButtressDataService request queue', () => {
     releaseFirst();
     await idle;
 
-    expect((ds as any).__awaitIdleQueue.length).to.equal(0);
+    expect((ds as any)._queue._idleWaiters.length).to.equal(0);
   });
 });
 
