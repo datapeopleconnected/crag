@@ -48,7 +48,8 @@ once it upgrades. With TypeScript's `experimentalDecorators`, keep `useDefineFor
 ## Migrating from 0.0.x
 
 `@lighten/ltn-element` is no longer a dependency: `ButtressDbService` extends `LitElement` and is found through context
-instead of the ltn service locator.
+instead of the ltn service locator. crag now depends on Lit 3, so apps still on Lit 2 will load two copies of Lit until
+they upgrade.
 
 - Replace `this._getService(ButtressDbService)` with a `@consume({ context: buttressDbServiceContext })` property, as
   above.
