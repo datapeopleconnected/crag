@@ -330,8 +330,9 @@ npm run test:unit
 | ----------------------- | --------------------------------------------------------------- |
 | `src/`                  | Source. `src/components/` registers the element.                |
 | `test/unit/`            | Unit tests, run from source in Chrome.                          |
-| `test/e2e/`             | End-to-end tests against a live Buttress server.                |
-| `scripts/before-e2e.js` | Seeds the test server before the end-to-end run.               |
+| `test/e2e/`             | End-to-end tests, run in Chrome against Buttress in Docker.     |
+| `scripts/`              | Starts and seeds Buttress for the end-to-end tests.             |
+| `.docker/`              | The Buttress stack the end-to-end tests run against.            |
 | `demo/`                 | The page `npm start` serves.                                    |
 | `docs/`                 | Guides, such as the [0.1 migration guide](docs/migrating-to-0.1.md). |
 | `dist/`                 | Build output. It's published along with `src/` and the licence. |
@@ -342,7 +343,7 @@ npm run test:unit
 | `npm run build`               | Compiles `src/` to `dist/`.                                                    |
 | `npm run test:unit`           | Runs the unit tests in Chrome. No build or server needed.                      |
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
-| `npm test`                    | Builds, bundles and runs the end-to-end tests.                                 |
+| `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
 | `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
 | `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
 | `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
@@ -351,18 +352,28 @@ npm run test:unit
 
 ### End-to-end tests
 
-The end-to-end tests run against `https://test.local.buttressjs.com` and need a super token:
+The end-to-end tests need [Docker](https://docs.docker.com/get-docker/) with Compose v2, and nothing else:
 
 ```bash
-BUTTRESS_TEST_SUPER_TOKEN=... npm test
+npm test
 ```
 
-> [!WARNING]
-> Before seeding, `scripts/before-e2e.js` **deletes every app** on the server. Make sure `test.local.buttressjs.com`
-> points at a disposable test instance.
+After building, `scripts/e2e.js` starts Buttress, MongoDB and Redis in containers, and seeds Buttress with a test app,
+policies, users and organisations (`scripts/e2e-seed.js`). It then runs the tests in Chrome and removes the containers.
+Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first.
 
-The seed script creates a test app with a schema, policies, users and organisations. It writes the app and user tokens
-to `test-app-token.json` (ignored by git), which the test runner reads.
+The first run downloads the images. Later runs check for a newer `dpcltd/buttress:develop` and fall back to the copy
+you have when Docker Hub can't be reached. To test against a different image, such as one built from a Buttress
+checkout, set `BUTTRESS_IMAGE`:
+
+```bash
+docker build -t buttress:local path/to/buttress-js
+BUTTRESS_IMAGE=buttress:local npm test
+```
+
+`scripts/e2e.js` runs whatever command it's given, with the endpoint and tokens in `BUTTRESS_E2E_*` environment
+variables. To look around a seeded Buttress, open a shell with `node scripts/e2e.js bash`. The containers are removed
+when you exit it.
 
 ### Commits and publishing
 

@@ -33,6 +33,20 @@ jobs:
       - run: npm run format
       - run: npm run typecheck
       - run: npm run licence-check
-      # Unit tests only: the e2e suite (npm test) needs a live Buttress instance.
       - run: npm run test:unit
       - run: npm run publint
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Builds, then runs the end-to-end tests against a Buttress it starts in Docker.
+      - run: npm test

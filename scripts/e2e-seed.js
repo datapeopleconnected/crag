@@ -14,41 +14,31 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import fs from 'node:fs';
+// Seeds a new Buttress with the app, schema, policies, users and organisations that test/e2e expects, and
+// returns the tokens the tests connect with. scripts/e2e.js calls it.
+export const seed = async (endpoint, superToken) => {
+  const bjsRequest = async (method, path, body, token = superToken, apiPath = false) => {
+    let url = `${endpoint}/api/v1/${path}`;
+    if (apiPath) url = `${endpoint}/${apiPath}/api/v1/${path}`;
+    const res = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: (body) ? JSON.stringify(body) : undefined
+    });
 
-const ENDPOINT = 'https://test.local.buttressjs.com';
-const TOKEN = process.env.BUTTRESS_TEST_SUPER_TOKEN;
+    if (!res.ok) {
 
-if (!TOKEN) {
-  throw new Error('BUTTRESS_TEST_SUPER_TOKEN environment variable is not set.');
-}
+      // Why did it fail?
+      const errorText = await res.text();
+      console.error(`Error response from ${method} ${url}: ${res.status} ${res.statusText} - ${errorText}`);
+      throw new Error(`Failed to ${method} ${url}`);
+    }
 
-const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) => {
-  let url = `${ENDPOINT}/api/v1/${path}`;
-  if (apiPath) url = `${ENDPOINT}/${apiPath}/api/v1/${path}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: (body) ? JSON.stringify(body) : undefined
-  });
-
-  if (!res.ok) {
-
-    // Why did it fail?
-    const errorText = await res.text();
-    console.error(`Error response from ${method} ${url}: ${res.status} ${res.statusText} - ${errorText}`);
-    throw new Error(`Failed to ${method} ${url}`);
-  }
-
-  return res.json();
-};
-
-
-(async () => {
-  // Delete all other apps
+    return res.json();
+  };
 
   const schema = [{
     name: 'organisation',
@@ -132,9 +122,6 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
     ]
   }];
 
-  // Delete all existing apps
-  await bjsRequest('DELETE', 'app');
-
   // Create a new app for testing.
   const testApp = await bjsRequest('POST', 'app', {
     name: 'Test Application',
@@ -172,10 +159,9 @@ const bjsRequest = async (method, path, body, token = TOKEN, apiPath = false) =>
     }, testApp.token, 'test');
   }
 
-  // Write the token to a file.
-  fs.writeFileSync('test-app-token.json', JSON.stringify({
-    app: testApp,
-    testUser1: testUser1.tokens[0].value,
-    testUser2: testUser2.tokens[0].value,
-  }));
-})();
+  return {
+    appToken: testApp.token,
+    user1Token: testUser1.tokens[0].value,
+    user2Token: testUser2.tokens[0].value,
+  };
+};

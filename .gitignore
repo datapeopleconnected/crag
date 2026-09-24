@@ -23,6 +23,4 @@ out-tsc/
 .rollup.cache
 tsconfig.tsbuildinfo
 
-test-app-token.json
-
 

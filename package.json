@@ -27,7 +27,7 @@
     "./dist/components/*.js"
   ],
   "scripts": {
-    "clean": "rimraf dist .test-bundle test-app-token.json tsconfig.tsbuildinfo",
+    "clean": "rimraf dist .test-bundle tsconfig.tsbuildinfo",
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
     "build": "rimraf dist tsconfig.tsbuildinfo && tsc --build --pretty",
     "roll": "rimraf .test-bundle && rollup -c rollup.config.mjs",
@@ -35,7 +35,7 @@
     "licence-check": "./.husky/licence-check",
     "test": "npm run build && npm run roll && npm run test:e2e",
     "test:unit": "wtr --config web-test-runner.unit.config.mjs",
-    "test:e2e": "node ./scripts/before-e2e.js && wtr --node-resolve",
+    "test:e2e": "node ./scripts/e2e.js wtr --node-resolve",
     "test:watch": "npm run test:unit -- --watch",
     "publint": "publint && attw --pack . --profile esm-only",
     "prepack": "npm run build",
