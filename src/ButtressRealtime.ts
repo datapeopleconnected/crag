@@ -75,6 +75,9 @@ export default class ButtressDataRealtime {
       ? `${this._settings.endpoint}/${this._settings.apiPath}`
       : this._settings.endpoint;
 
+    // Calling connect() again replaces the socket rather than leaving the old one open.
+    this.disconnect();
+
     this._logger.debug(`Opening connection to ${uri}`);
 
     this._dispatchCustomEvent('bjs-connection-changed', {

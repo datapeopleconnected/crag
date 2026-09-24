@@ -146,3 +146,52 @@ describe('ButtressDbService realtime', () => {
     expect(disconnects).to.equal(1);
   });
 });
+
+describe('ButtressDbService connect', () => {
+  let originalFetch: typeof window.fetch;
+  let resolveSchema: () => void;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    // Holds the schema request open until the test resolves it, with an empty schema list.
+    window.fetch = () =>
+      new Promise<Response>((resolve) => {
+        resolveSchema = () => resolve(new Response('[]', { status: 200 }));
+      });
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const connectWithStubbedRealtime = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+    `);
+    let realtimeConnects = 0;
+    (el as any)._realtime.connect = () => {
+      realtimeConnects += 1;
+    };
+    const connecting = el.connect();
+    return { el, connecting, realtimeConnects: () => realtimeConnects };
+  };
+
+  it('opens the realtime socket once the schemas have loaded', async () => {
+    const { connecting, realtimeConnects } = await connectWithStubbedRealtime();
+
+    resolveSchema();
+    await connecting;
+
+    expect(realtimeConnects()).to.equal(1);
+  });
+
+  it('does not open the realtime socket if removed while the schemas load', async () => {
+    const { el, connecting, realtimeConnects } = await connectWithStubbedRealtime();
+
+    el.remove();
+    resolveSchema();
+    await connecting;
+
+    expect(realtimeConnects()).to.equal(0);
+  });
+});

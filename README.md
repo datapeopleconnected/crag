@@ -75,7 +75,8 @@ customElements.define('organisation-list', OrganisationList);
 ## How it works
 
 - `connect()` fetches your app's schemas and creates a data service for each one, then opens the realtime socket.
-  `awaitConnection()` resolves once the schemas have loaded.
+  `awaitConnection()` resolves once the schemas have loaded. Calling `connect()` again replaces the socket, and
+  removing the element closes it.
 - Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
   loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
 - Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a

@@ -185,7 +185,11 @@ export class ButtressDbService extends LitElement {
       throw new Error(`Missing required setting 'apiPath'`);
     }
 
+    const wasInDocument = this.isConnected;
     await this._connect();
+    // Removed while the schemas were loading: disconnectedCallback has already run, so nothing would close the socket.
+    if (wasInDocument && !this.isConnected) return;
+
     await this._realtime.connect();
   }
 

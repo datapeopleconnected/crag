@@ -41,6 +41,28 @@ describe('ButtressRealtime', () => {
     expect((realtime as any)._socket).to.equal(null);
   });
 
+  it('closes the previous socket when connect is called again', () => {
+    const settings = buildSettings({});
+    settings.endpoint = 'http://127.0.0.1:1';
+    settings.token = 'abc';
+    const realtime = new ButtressRealtime(
+      {} as any,
+      settings,
+      () => {},
+      () => {},
+    );
+
+    realtime.connect();
+    const first = (realtime as any)._socket;
+    realtime.connect();
+    const second = (realtime as any)._socket;
+
+    expect(first.active).to.equal(false);
+    expect(second.active).to.equal(true);
+
+    realtime.disconnect();
+  });
+
   it('does nothing on disconnect before connect', () => {
     const realtime = new ButtressRealtime(
       {} as any,
