@@ -3,6 +3,10 @@
   "description": "Webcomponent buttress-db-service following open-wc recommendations",
   "license": "AGPL-3.0-or-later",
   "author": "Data People Connected LTD",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/datapeopleconnected/crag.git"
+  },
   "version": "0.0.21",
   "type": "module",
   "main": "./dist/index.js",
@@ -88,6 +92,9 @@
     "rollup": "^2.79.2",
     "stylelint": "^17.15.0",
     "typescript": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=24"
   },
   "husky": {
     "hooks": {
