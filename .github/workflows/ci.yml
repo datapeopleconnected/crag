@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  # Lets the Publish workflow run these checks before it publishes a release.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # demo/index.html imports from dist/, which ESLint resolves, so build before linting.
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run format
+      - run: npm run typecheck
+      - run: npm run licence-check
+      # Unit tests only: the e2e suite (npm test) needs a live Buttress instance.
+      - run: npm run test:unit
+      - run: npm run publint
