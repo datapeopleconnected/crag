@@ -2,28 +2,214 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>crag demo</title>
   <style>
     body {
+      margin: 0 auto;
+      max-width: 48rem;
+      padding: 1rem;
+      font-family: system-ui, sans-serif;
+      line-height: 1.4;
       background: #fafafa;
+      color: #222;
+    }
+
+    form {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.5rem 1rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    form button {
+      grid-column: 2;
+      justify-self: start;
+    }
+
+    input {
+      font: inherit;
+      padding: 0.25rem 0.5rem;
     }
   </style>
 </head>
 <body>
+  <h1>crag demo</h1>
+  <p>
+    Connects to a Buttress server, loads one schema's entities and keeps the list up to date as other clients change
+    them. The token isn't saved; the other fields are remembered in this browser.
+  </p>
+
+  <form id="settings">
+    <label for="endpoint">Endpoint</label>
+    <input id="endpoint" name="endpoint" type="url" placeholder="https://buttress.example.com" required>
+
+    <label for="api-path">API path</label>
+    <input id="api-path" name="apiPath" placeholder="my-app" required>
+
+    <label for="token">App token</label>
+    <input id="token" name="token" type="password" autocomplete="off" required>
+
+    <label for="schema">Schema</label>
+    <input id="schema" name="schema" placeholder="organisation" required>
+
+    <button type="submit">Connect</button>
+  </form>
+
   <div id="demo"></div>
 
   <script type="module">
-    import { html, render } from 'lit';
-    import '../dist/src/buttress-db-service.js';
+    import { LitElement, html, css, render } from 'lit';
+    import { keyed } from 'lit/directives/keyed.js';
+    import { ContextConsumer } from '@lit/context';
+    import { buttressDbServiceContext } from '../dist/index.js';
+    import '../dist/components/buttress-db-service.js';
 
-    const title = 'Hello owc World!';
-    render(
-      html`
-        <buttress-db-service .title=${title}>
-          some light-dom
-        </buttress-db-service>
-      `,
-      document.querySelector('#demo')
-    );
+    // Shows whether the realtime socket is connected. It listens on the service it gets through context, rather than
+    // on an ancestor, so it works wherever the element sits.
+    class CragDemoStatus extends LitElement {
+      static properties = { _status: { state: true } };
+
+      static styles = css`
+        :host {
+          display: block;
+          margin-bottom: 1rem;
+          font-weight: 600;
+        }
+      `;
+
+      _onConnectionChanged = (e) => {
+        this._status = e.detail ? 'Realtime socket connected' : 'Realtime socket disconnected';
+      };
+
+      // Plain JavaScript has no decorators, so use the controller that @consume wraps.
+      _db = new ContextConsumer(this, {
+        context: buttressDbServiceContext,
+        callback: (db) => db.addEventListener('bjs-connection-changed', this._onConnectionChanged),
+      });
+
+      constructor() {
+        super();
+        // Set here rather than as a class field, which would hide Lit's accessor for the property.
+        this._status = 'Loading schemas…';
+      }
+
+      disconnectedCallback() {
+        super.disconnectedCallback();
+        this._db.value?.removeEventListener('bjs-connection-changed', this._onConnectionChanged);
+      }
+
+      render() {
+        return html`${this._status}`;
+      }
+    }
+    customElements.define('crag-demo-status', CragDemoStatus);
+
+    // Queries one schema, then subscribes to it so realtime changes from other clients show up.
+    class CragDemoEntities extends LitElement {
+      static properties = { schema: {}, _error: { state: true }, _total: { state: true } };
+
+      static styles = css`
+        :host {
+          display: block;
+        }
+
+        pre {
+          overflow-x: auto;
+          padding: 0.5rem;
+          background: #fff;
+          border: 1px solid #ddd;
+        }
+      `;
+
+      _db = new ContextConsumer(this, { context: buttressDbServiceContext });
+
+      async firstUpdated() {
+        const db = this._db.value;
+        await db.awaitConnection();
+
+        if (!db.getSchema(this.schema)) {
+          this._error = `The app has no schema called "${this.schema}".`;
+          return;
+        }
+
+        try {
+          const { total } = await db.query(this.schema, {}, { limit: 20 });
+          this._total = total;
+        } catch (err) {
+          this._error = err.message;
+          return;
+        }
+
+        this._subscription = db.subscribe(`${this.schema}.*`, () => this.requestUpdate());
+      }
+
+      disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._subscription) this._db.value?.unsubscribe(this._subscription);
+      }
+
+      render() {
+        if (this._error) return html`<p>${this._error}</p>`;
+        if (this._total === undefined) return html`<p>Loading ${this.schema}…</p>`;
+
+        // The store holds every loaded entity under the schema's name, including ones that arrive in realtime.
+        const entities = [...(this._db.value.get(this.schema)?.values() ?? [])];
+        return html`
+          <h2>${this.schema}</h2>
+          <p>Showing ${entities.length} of ${this._total} in Buttress.</p>
+          ${entities.map((entity) => html`<pre>${JSON.stringify(entity, null, 2)}</pre>`)}
+        `;
+      }
+    }
+    customElements.define('crag-demo-entities', CragDemoEntities);
+
+    const form = document.querySelector('#settings');
+    const saved = ['endpoint', 'apiPath', 'schema'];
+
+    try {
+      const stored = JSON.parse(localStorage.getItem('crag-demo') ?? '{}');
+      for (const name of saved) if (stored[name]) form.elements[name].value = stored[name];
+    } catch {
+      // Storage can be blocked. The form still works; it just starts empty.
+    }
+
+    let attempt = 0;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const values = Object.fromEntries(new FormData(form));
+
+      try {
+        localStorage.setItem('crag-demo', JSON.stringify(Object.fromEntries(saved.map((name) => [name, values[name]]))));
+      } catch {
+        // Not remembering the settings is fine.
+      }
+
+      // Settings changed after connect() don't reconnect, so each attempt gets a new element. Lit removes the old one,
+      // which closes its socket.
+      attempt += 1;
+      const demo = document.querySelector('#demo');
+      render(
+        keyed(
+          attempt,
+          html`
+            <buttress-db-service endpoint=${values.endpoint} api-path=${values.apiPath} token=${values.token}>
+              <crag-demo-status></crag-demo-status>
+              <crag-demo-entities schema=${values.schema}></crag-demo-entities>
+            </buttress-db-service>
+          `,
+        ),
+        demo,
+      );
+
+      try {
+        await demo.querySelector('buttress-db-service').connect();
+      } catch (err) {
+        render(html`<p>Couldn't connect: ${err.message}</p>`, demo);
+      }
+    });
   </script>
 </body>
 </html>

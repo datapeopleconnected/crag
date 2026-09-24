@@ -1,0 +1,51 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing: npm swaps this job's OIDC token for a short-lived publish token
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Check the tag matches package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME doesn't match package.json version $version (expected v$version)."
+            exit 1
+          fi
+      # Anything running in this job can mint a publish token, so skip dependencies' install scripts.
+      # npm publish still runs our own prepack, which builds dist/.
+      - run: npm ci --ignore-scripts
+      - name: Publish
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          # Keep pre-releases off `latest`, so `npm i @buttress/crag` still installs the last stable release.
+          if [ "$PRERELEASE" = true ] || [[ "$version" == *-* ]]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi

@@ -39,6 +39,7 @@ check_dir() {
 
 check_dir "src"
 check_dir "scripts"
+check_dir "test"
 
 has_errors=$(<"$has_errors_file")
 rm "$has_errors_file"

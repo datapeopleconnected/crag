@@ -13,51 +13,49 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
-import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
-import { ObjectId } from 'bson';
+import { Logger, LogLevel } from './Logger.js';
+import { ButtressClient } from './ButtressClient.js';
+import { ButtressRequestQueue } from './ButtressRequestQueue.js';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
-import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, IndexSplice, ButtressEntity } from './ButtressStore.js';
+import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
+import { Settings, buildSettings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
 
 export interface QueryResult {
-  skip?: number,
-  limit?: number,
-  total: number,
-  results: ButtressEntity[]
+  skip?: number;
+  limit?: number;
+  total: number;
+  results: ButtressEntity[];
 }
 export interface SortOpts {
-  path: string
-  type?: 'STRING'|'NUMBER'|'DATE'|'BOOLEAN'
-  direction: 'ASC'|'DESC'
+  path: string;
+  type?: 'STRING' | 'NUMBER' | 'DATE' | 'BOOLEAN';
+  direction: 'ASC' | 'DESC';
 }
 
 export interface BJSSortOpt {
-  [key: string]: number
+  [key: string]: number;
 }
 
 export interface QueryOpts {
-  limit?: number
-  skip?: number
-  sort?: SortOpts
-  project?: any
-  bust?: boolean
-  actualCount?: boolean
+  limit?: number;
+  skip?: number;
+  sort?: SortOpts;
+  project?: any;
+  bust?: boolean;
+  actualCount?: boolean;
 }
 
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
 
   path: string;
-  
+
   private __route: string;
 
-  private _logger: LtnLogger;
-
-  readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
+  private _logger: Logger;
 
   private _store: ButtressStore;
 
@@ -65,45 +63,48 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _settings: Settings;
 
-  private _queryMap: Array<string> = [];
+  private _queue: ButtressRequestQueue;
 
-  private _requestQueue: Array<any> = [];
+  // The ids each search returned, in the server's order, keyed by __queryKey().
+  private _queryCache: Map<string, { ids: string[]; paged: boolean; generation: number }> = new Map();
 
-  private __awaitIdleQueue: Array<Function> = [];
-
-  status: string = 'pending';
+  // Bumped by a create: cached pages from an earlier generation are searched for again.
+  private __pageGeneration = 0;
 
   core: boolean = false;
 
-  bundling: boolean = true;
-
-  bundlingChunk: number = 100;
-
-  constructor(name: string, core: boolean, settings: Settings, store: ButtressStore, schema: ButtressSchema) {
+  constructor(name: string, core: boolean, settings: Partial<Settings>, store: ButtressStore, schema: ButtressSchema) {
     this.name = name;
     this.core = core;
-    this._settings = settings;
+    this._settings = buildSettings(settings);
 
     this.path = this.name;
 
-    this.__route = this.path.split('-').map((part) => Dasherize(part)).join('/');
+    this.__route = this.path
+      .split('-')
+      .map((part) => Dasherize(part))
+      .join('/');
 
-    this._logger = new LtnLogger(`buttress-data-service-${name}`);
+    this._logger = new Logger(`buttress-data-service-${name}`);
+
+    this._queue = new ButtressRequestQueue(
+      new ButtressClient(this._settings),
+      (type) => this.getUrl('bulk', type),
+      this._logger,
+    );
 
     this._schema = schema;
 
     this._store = store;
 
     this._store.set(this.name, new Map());
-
-    this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
   }
 
-  setLogLevel(level: LtnLogLevel) {
+  setLogLevel(level: LogLevel) {
     this._logger.level = level;
   }
 
-  create(value: ButtressEntity, opts?: NotifyChangeOpts): string|undefined {
+  create(value: ButtressEntity, opts?: NotifyChangeOpts): string | undefined {
     const val = value;
 
     // Generate ID if not provided
@@ -114,11 +115,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
       throw new Error('Unable to create entity with duplicate id');
     }
 
-    return this._store.create(this.name, value, opts);
+    const path = this._store.create(this.name, value, ButtressDataService.__storeOpts(opts));
+    // Only Buttress can say which page a new entity belongs on.
+    this.__pageGeneration += 1;
+    this.__send(opts, () => [this.__generateAddRequest(value)]);
+
+    return path;
   }
 
   delete(id: string, opts?: NotifyChangeOpts) {
-    return this._store.delete(`${this.name}.${id}`, opts);
+    if (!this._store.get(`${this.name}.${id}`)) {
+      opts?.dboComplete?.resolve();
+      return false;
+    }
+
+    const deleted = this._store.delete(`${this.name}.${id}`, ButtressDataService.__storeOpts(opts));
+    this.__send(opts, () => [this.__generateRmRequest(id)]);
+
+    return deleted;
   }
 
   // Data accessors
@@ -126,202 +140,136 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this._store.get(path);
   }
 
-  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
-    return this._store.set(path, value, opts);
+  set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
+    const parts = path.split('.');
+    if (parts.length === 2) return this.__setEntity(parts[1], value, opts);
+
+    // Nothing to set inside an object that isn't in the store.
+    const parent = parts.length > 2 ? this._store.get(parts.slice(0, -1).join('.')) : undefined;
+    if (parts.length > 2 && (typeof parent !== 'object' || parent === null)) {
+      opts?.dboComplete?.resolve();
+      return undefined;
+    }
+
+    const changed = this._store.get(path) !== value;
+    const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
+    // A set of the whole collection is only ever local.
+    const entityPath = parts.slice(2).join('.');
+    this.__send(opts, () => (changed && entityPath ? [this.__generateUpdateRequest(parts[1], entityPath, value)] : []));
+
+    return setPath;
+  }
+
+  private __setEntity(id: string, value: any, opts?: NotifyChangeOpts): string | undefined {
+    if (value && typeof value === 'object') {
+      if (value.id === undefined || value.id === null || value.id === '') {
+        value.id = id;
+      } else if (value.id !== id) {
+        throw new Error(`The entity's id '${value.id}' doesn't match the id in the path, '${id}'`);
+      }
+    }
+
+    const existing = this._store.get(`${this.name}.${id}`);
+    const setPath = this._store.set(`${this.name}.${id}`, value, ButtressDataService.__storeOpts(opts));
+
+    if (!existing) {
+      this.__pageGeneration += 1;
+      this.__send(opts, () => [this.__generateAddRequest(value)]);
+      return setPath;
+    }
+
+    // Buttress updates an entity one path at a time, so send the top-level properties that changed.
+    const changed = Object.keys(value || {}).filter(
+      (key) => key !== 'id' && JSON.stringify(value[key]) !== JSON.stringify(existing[key]),
+    );
+    this.__send(opts, () => changed.map((key) => this.__generateUpdateRequest(id, key, value[key])));
+
+    return setPath;
+  }
+
+  // Queues a write's requests, unless its options keep it from Buttress, and settles dboComplete once they have.
+  private __send(opts: NotifyChangeOpts | undefined, requests: () => Promise<unknown>[]) {
+    const sent = ButtressDataService.__sends(opts) ? requests() : [];
+    Promise.all(sent).then(
+      () => opts?.dboComplete?.resolve(),
+      (err) => opts?.dboComplete?.reject(err),
+    );
+  }
+
+  private static __sends(opts?: NotifyChangeOpts): boolean {
+    return !opts?.localOnly && !opts?.silent && !opts?.forceChanged;
+  }
+
+  // Objects added to an array get an id, as Buttress expects of them.
+  private static __giveIds(items: any[]) {
+    items.forEach((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item) && !item.id) {
+        item.id = ButtressSchemaFactory.getObjectId();
+      }
+    });
+  }
+
+  // The data service settles dboComplete itself, so the store mustn't also resolve it.
+  private static __storeOpts(opts?: NotifyChangeOpts): NotifyChangeOpts | undefined {
+    if (!opts?.dboComplete) return opts;
+    const { dboComplete: _dboComplete, ...rest } = opts;
+    return rest;
   }
 
   push(path: string, ...items: any[]): number {
-    return this._store.push(path, this._schema, ...items);
+    return this.pushExt(path, undefined, ...items);
   }
 
   pushExt(path: string, opts?: NotifyChangeOpts, ...items: any[]): number {
-    return this._store.pushExt(path, this._schema, opts, ...items);
+    if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const length = this._store.pushExt(path, this._schema, ButtressDataService.__storeOpts(opts), ...items);
+
+    const [, id, ...arrayPath] = path.split('.');
+    this.__send(opts, () => items.map((item) => this.__generateUpdateRequest(id, arrayPath.join('.'), item)));
+
+    return length;
   }
 
+  // splice(path, start) removes to the end, as Array.prototype.splice does.
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
-    if (arguments.length < 3) return this._store.splice(path, this._schema, start);
-
-    return this._store.splice(path, this._schema, start, deleteCount, ...items);
+    return this.spliceExt(path, start, deleteCount, undefined, ...items);
   }
 
   spliceExt(path: string, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] {
-    return this._store.spliceExt(path, this._schema, start, deleteCount, opts, ...items)
+    const before = this._store.get(path);
+    const length = Array.isArray(before) ? before.length : 0;
+    // Counted as Array.prototype.splice counts it, so the requests use the index the store spliced at.
+    const from = Math.trunc(start) || 0;
+    const index = from < 0 ? Math.max(length + from, 0) : Math.min(from, length);
+
+    if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const removed = this._store.spliceExt(
+      path,
+      this._schema,
+      index,
+      deleteCount,
+      ButtressDataService.__storeOpts(opts),
+      ...items,
+    );
+
+    const [, id, ...rest] = path.split('.');
+    const arrayPath = rest.join('.');
+    this.__send(opts, () => {
+      // Each remove shifts the items after it down, so every one is at the same index.
+      if (items.length === 0)
+        return removed.map(() => this.__generateUpdateRequest(id, `${arrayPath}.${index}.__remove__`, ''));
+      if (removed.length === 0 && index === length) {
+        return items.map((item) => this.__generateUpdateRequest(id, arrayPath, item));
+      }
+      // Buttress can only append to an array or remove from it, so anything else sends the whole array.
+      return [this.__generateUpdateRequest(id, arrayPath, [...this._store.get(path)])];
+    });
+
+    return removed;
   }
 
   notifyPath(path: string, value?: any, opts?: NotifyChangeOpts): boolean {
     return this._store.notifyPath(path, value, opts);
-  }
-
-  // eslint-disable-next-line class-methods-use-this
-  _processDataChange(cr: any) : void {
-    if (/\.length$/.test(cr.path) === true) {
-      return;
-    }
-
-    if (/__(\w+)__/.test(cr.path)) {
-      this._logger.debug(`Ignoring internal change: ${cr.path}`);
-      return;
-    }
-
-    if (cr.opts?.localOnly) {
-      this._logger.debug(`Ignoring localOnly change: ${cr.path}`);
-      return;
-    }
-
-    this._logger.debug(cr);
-
-    const path = cr.path.split('.');
-    if (/\.splices$/.test(cr.path) === true) {
-      if (path.length < 4) {
-        // Modification to base
-        cr.value.indexSplices.forEach((i: IndexSplice) => {
-          if (i.opts?.localOnly) {
-            this._logger.debug(`Ignoring localOnly change to base indexSplice: ${cr.path}`);
-            return;
-          }
-
-          if (i.addedCount > 0) {
-            this._logger.error(`Deprecated - Base array index addition, the base array is now a map`);
-            // const o = i.object[i.index];
-            // if (!o.id) o.id = new ObjectId().toString();
-
-            // this.__generateAddRequest(o);
-          }
-
-          i.removed.forEach((r: any) => {
-            this._logger.debug(`this.__generateRmRequest(${r.id});`);
-            this.__generateRmRequest(r.id)
-              .then(() => {
-                if (cr.opts?.dboComplete) {
-                  cr.opts.dboComplete.resolve();
-                }
-              }).catch((err) => {
-                if (cr.opts?.dboComplete) {
-                  cr.opts.dboComplete.reject(err);
-                }
-              });
-          });
-        });
-      } else {
-        const entity = this._store.get(path.slice(0, 2).join('.'));
-
-        this._logger.debug(entity);
-
-        this._logger.debug('Child array mutation', cr);
-        this._logger.debug('Index Splices: ', cr.value.indexSplices?.length);
-        this._logger.debug('Key Splices: ', cr.value.keySplices?.length);
-
-        if (cr.value.indexSplices?.length > 0) {
-          cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
-            if (indexSplice.opts?.localOnly) {
-              this._logger.debug(`Ignoring localOnly change to indexSplice: ${cr.path}`);
-              return;
-            }
-
-            const o = indexSplice.object[indexSplice.index];
-            if (indexSplice.addedCount > 0) {
-              // Remove datastore entity prefix
-              path.splice(0,2);
-              // Remove .splices
-              path.splice(-1,1);
-              if (typeof o === 'object' && !o.id) {
-                o.id = new ObjectId().toHexString();
-              }
-
-              this.__generateUpdateRequest(entity.id, path.join('.'), o)
-                .then(() => {
-                  if (cr.opts?.dboComplete) {
-                    cr.opts.dboComplete.resolve();
-                  }
-                }).catch((err) => {
-                  if (cr.opts?.dboComplete) {
-                    cr.opts.dboComplete.reject(err);
-                  }
-                });
-            } else if (indexSplice.removed.length > 0){
-              if(indexSplice.removed.length > 1) {
-                this._logger.debug('Index splice removed.length > 1', indexSplice.removed);
-              } else {
-                path.splice(0, 2);
-                path.splice(-1, 1);
-                path.push(indexSplice.index);
-                path.push('__remove__');
-
-                this.__generateUpdateRequest(entity.id, path.join('.'), '')
-                  .then(() => {
-                    if (cr.opts?.dboComplete) {
-                      cr.opts.dboComplete.resolve();
-                    }
-                  }).catch((err) => {
-                    if (cr.opts?.dboComplete) {
-                      cr.opts.dboComplete.reject(err);
-                    }
-                  });
-              }
-            }
-          });
-        } else if (cr.value.keySplices) {
-          this._logger.debug('Key Splices: ', cr.value.keySplices);
-          // cr.value.keySplices.forEach((k, idx) => {
-          //   k.removed.forEach(() => {
-          //     const itemIndex = cr.value.indexSplices[idx].index;
-          //     this._logger.debug(itemIndex);
-    
-          //     path.splice(0, 2); // drop the prefix
-          //     path.splice(-1, 1); // drop the .splices
-          //     path.push(itemIndex); // add the correct index
-    
-          //     // path.push(k.replace('#', ''));
-          //     path.push('__remove__'); // add the remove command
-          //     this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
-          //     // this.__generateUpdateRequest(entity.id, path.join('.'), '');
-          //   });
-          // });
-        }
-      }
-    } else {
-      if (path.length < 2) {
-        // Path is a whole update to the collection so we'll ignore it
-        return;
-      }
-
-      const isAddition = (path.length === 2);
-
-      const pathToEntity = path.splice(0, 2).join('.');
-      const item = this._store.get(pathToEntity);
-
-      // What if the entity doesn't exist?
-      if (!item) {
-        throw new Error('Unable to process data change, entity doesn\'t exist in local store.');
-      }
-
-      if (isAddition) {
-        // Addition to a base object
-        this.__generateAddRequest(item)
-          .then(() => {
-            if (cr?.opts?.dboComplete) {
-              cr.opts.dboComplete.resolve();
-            }
-          }).catch((err) => {
-            if (cr?.opts?.dboComplete) {
-              cr.opts.dboComplete.reject(err);
-            }
-          });
-        return;
-      }
-
-      this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
-        .then(() => {
-          if (cr?.opts?.dboComplete) {
-            cr.opts.dboComplete.resolve();
-          }
-        }).catch((err) => {
-          if (cr?.opts?.dboComplete) {
-            cr.opts.dboComplete.reject(err);
-          }
-        });
-    }
-
   }
 
   updateSchema(schema: ButtressSchema) {
@@ -338,7 +286,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (this._store.get(`${this.name}.${entity.id}`)) return entity;
 
     this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
-      silent: true
+      silent: true,
     });
 
     return entity;
@@ -347,48 +295,60 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
     if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
-    // We only need to make a call to fetch the data into our local store. We then
-    // filter the data in the local store to get the results of the query.
+    // Fetches the matching entities into the local store, unless this search is cached.
     await this.search(buttressQuery, opts);
 
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
-    return this.__filterLocalData(buttressQuery, {
-      limit: opts?.limit,
-      skip: opts?.skip,
-      total,
-      sort: opts?.sort
-    });
+    const paged = ButtressDataService.__isPaged(opts);
+    const results = paged ? this.__cachedPage(buttressQuery, opts) : this.__filterLocalData(buttressQuery, opts?.sort);
+
+    return { skip: opts?.skip, limit: opts?.limit, total, results };
   }
 
-  private __filterLocalData(buttressQuery: any, opts: {total: number, limit?: number, skip?: number, sort?: SortOpts}): QueryResult {
-    let data = this._store.get(this.name);
+  // A page can't be cut from the store, which may hold matches the server left off it, so a
+  // page is the entities the server sent, less any since deleted or changed so they don't match.
+  private __cachedPage(buttressQuery: any, opts?: QueryOpts): ButtressEntity[] {
+    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts))?.ids || [];
+    const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
+    // _processQueryPart can reorder the entities ($or does), so keep the server's order.
+    const matching = new Set(this.__matchLocally(buttressQuery, entities));
 
-    // Pirate mode
-    let arr = Array.from(data.values());
+    return entities.filter((entity) => matching.has(entity));
+  }
 
-    if (opts.sort) {
-      arr = arr.sort((a: any, b: any) => this.__sort(a, b, opts.sort as SortOpts));
+  private __filterLocalData(buttressQuery: any, sort?: SortOpts): ButtressEntity[] {
+    let arr = Array.from(this._store.get(this.name).values());
+
+    if (sort) {
+      arr = arr.sort((a: any, b: any) => this.__sort(a, b, sort));
     }
 
+    return this.__matchLocally(buttressQuery, arr);
+  }
+
+  private __matchLocally(buttressQuery: any, entities: any[]): ButtressEntity[] {
     try {
-      data = this._processQueryPart(buttressQuery, arr);
+      return this._processQueryPart(buttressQuery, entities);
     } catch (err) {
-      this._logger.error('Query was:', this.query);
+      this._logger.error('Query was:', buttressQuery);
       throw err;
     }
+  }
 
-    if (opts?.limit) {
-      data = data.splice(opts.skip || 0, opts.limit);
-    }
+  private static __isPaged(opts?: QueryOpts): boolean {
+    return !!(opts?.limit || opts?.skip);
+  }
 
-    return {
-      skip: opts?.skip,
+  private __queryKey(buttressQuery: any, opts?: QueryOpts): string {
+    return JSON.stringify({
+      buttressQuery,
       limit: opts?.limit,
-      total: opts.total,
-      results: data
-    };
+      skip: opts?.skip,
+      sort: opts?.sort,
+      project: opts?.project,
+    });
   }
 
   private __sort(a: any, b: any, sort: SortOpts): number {
@@ -398,16 +358,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
     let sortType = sort.type || 'STRING';
 
     if (sortType === 'STRING') {
-      aVal = (aVal) ? aVal.toLowerCase() : '';
-      bVal = (bVal) ? bVal.toLowerCase() : '';
+      aVal = aVal ? aVal.toLowerCase() : '';
+      bVal = bVal ? bVal.toLowerCase() : '';
     } else if (sortType === 'DATE') {
-      aVal = (aVal) ? new Date(aVal).getTime() : 0;
-      bVal = (bVal) ? new Date(bVal).getTime() : 0;
+      aVal = aVal ? new Date(aVal).getTime() : 0;
+      bVal = bVal ? new Date(bVal).getTime() : 0;
       sortType = 'NUMBER';
     }
 
     if (sortType === 'NUMBER') {
-      return (sort.direction === 'ASC') ? aVal - bVal : bVal - aVal;
+      return sort.direction === 'ASC' ? aVal - bVal : bVal - aVal;
     }
 
     if (sort.direction === 'ASC') {
@@ -422,15 +382,16 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     for (const field of Object.keys(query)) {
       if (field === '$and') {
-        // eslint-disable-next-line no-loop-func
         query[field].forEach((o: any) => {
           output = this._processQueryPart(o, output);
         });
       } else if (field === '$or') {
         output = query[field]
-          // eslint-disable-next-line no-loop-func
           .map((o: any) => this._processQueryPart(o, output))
-          .reduce((combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)), []);
+          .reduce(
+            (combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)),
+            [],
+          );
       } else {
         const command = query[field];
         for (const operator of Object.keys(command)) {
@@ -442,10 +403,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return output;
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private __parsePath(obj: any, path: string) {
     let value = this._store.get(path, obj);
-    value = (value)? value : this.__recursivePathLookUp(obj, path);
+    value = value ? value : this.__recursivePathLookUp(obj, path);
     return Array.isArray(value) ? value : [value];
   }
 
@@ -453,76 +413,91 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const parts = path.toString().split('.');
 
     const helper = (current: any, remainingParts: string[]): any[] | string | undefined => {
-        if (!current || remainingParts.length === 0) return current;
+      if (!current || remainingParts.length === 0) return current;
 
-        const [currentPart, ...restParts] = remainingParts;
+      const [currentPart, ...restParts] = remainingParts;
 
-        if (current instanceof Map) {
-            return helper(current.get(currentPart), restParts);
-        } else if (typeof current === 'object' && Array.isArray(current)) {
-            const results = current.map(item => helper(item, [currentPart, ...restParts])).flat().filter((v) => v);
-            return results.length > 0 ? results : undefined;
-        } else if (typeof current === 'object') {
-            return helper(current[currentPart], restParts);
-        }
+      if (current instanceof Map) {
+        return helper(current.get(currentPart), restParts);
+      } else if (typeof current === 'object' && Array.isArray(current)) {
+        const results = current
+          .map((item) => helper(item, [currentPart, ...restParts]))
+          .flat()
+          .filter((v) => v);
+        return results.length > 0 ? results : undefined;
+      } else if (typeof current === 'object') {
+        return helper(current[currentPart], restParts);
+      }
 
-        return undefined;
+      return undefined;
     };
 
     return helper(root, parts);
   };
 
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    const fns: {[key: string]: Function} = {
-      $not: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val !== rhs) !== -1,
-      $eq: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val === rhs) !== -1,
-      $gt: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val > rhs) !== -1,
-      $lt: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val < rhs) !== -1,
-      $gte: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val >= rhs) !== -1,
-      $lte: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val <= rhs) !== -1,
-      $rex: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => (new RegExp(rhs)).test(val)) !== -1,
-      $rexi: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => (new RegExp(rhs, 'i')).test(val)) !== -1,
-      $in: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).some((v) => rhs.indexOf(v) !== -1),
-      $nin: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).every((v) => rhs.indexOf(v) === -1),
-      $exists: (rhs: any) => (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => val === rhs) !== -1,
+    // Each operator takes its operand and returns the filter for it (the date ones return false for a null operand).
+    const fns: { [key: string]: (rhs: any) => ((lhs: any) => boolean) | false } = {
+      $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
+      $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
+      $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,
+      $lt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val < rhs) !== -1,
+      $gte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val >= rhs) !== -1,
+      $lte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val <= rhs) !== -1,
+      $rex: (rhs: any) => (lhs: any) =>
+        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs).test(val)) !== -1,
+      $rexi: (rhs: any) => (lhs: any) =>
+        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs, 'i').test(val)) !== -1,
+      $in: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).some((v) => rhs.indexOf(v) !== -1),
+      $nin: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).every((v) => rhs.indexOf(v) === -1),
+      // As in MongoDB: present, even if null. __parsePath gives no values for an empty array, so check for one.
+      $exists: (rhs: any) => (lhs: any) => {
+        const exists =
+          this.__parsePath(lhs, field).some((val) => val !== undefined) || Array.isArray(this._store.get(field, lhs));
+        return rhs ? exists : !exists;
+      },
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
-      $elMatch: (rhs: any) => (lhs: any) => (this._processQueryPart(rhs, this.__parsePath(lhs, field))).length > 0,
+      $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
       $gtDate: (rhs: any) => {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
-          if (val === null) return false; // Dont compare against null value
-          return DateIsBefore(rhsDate, val);
-        }) !== -1;
+        return (lhs: any) =>
+          this.__parsePath(lhs, field).findIndex((val) => {
+            if (val === null) return false; // Dont compare against null value
+            return DateIsBefore(rhsDate, val);
+          }) !== -1;
       },
       $ltDate: (rhs: any) => {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
-          if (val === null) return false; // Dont compare against null value
-          return DateIsAfter(rhsDate, val);
-        }) !== -1;
+        return (lhs: any) =>
+          this.__parsePath(lhs, field).findIndex((val) => {
+            if (val === null) return false; // Dont compare against null value
+            return DateIsAfter(rhsDate, val);
+          }) !== -1;
       },
       $gteDate: (rhs: any) => {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
-          if (val === null) return false; // Dont compare against null value
-          return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
-        }) !== -1;
+        return (lhs: any) =>
+          this.__parsePath(lhs, field).findIndex((val) => {
+            if (val === null) return false; // Dont compare against null value
+            return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
+          }) !== -1;
       },
       $lteDate: (rhs: any) => {
         if (rhs === null) return false;
         const rhsDate = DateCreate(rhs);
 
-        return (lhs: any) => (this.__parsePath(lhs, field)).findIndex(val => {
-          if (val === null) return false; // Dont compare against null value
-          return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
-        }) !== -1;
-      }
+        return (lhs: any) =>
+          this.__parsePath(lhs, field).findIndex((val) => {
+            if (val === null) return false; // Dont compare against null value
+            return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
+          }) !== -1;
+      },
     };
 
     if (!fns[operator]) {
@@ -536,13 +511,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
     if (!this._settings) return undefined;
 
-    // Rules on busting the hash
-    const hash = this._hashQuery({buttressQuery, limit: opts?.limit, skip: opts?.skip, sort: opts?.sort, project: opts?.project});
-    const hashIdx = this._queryMap.indexOf(`${hash}`);
-    if (opts?.bust && hashIdx !== -1) {
-      this._queryMap.splice(hashIdx, 1);
-    } else if (hashIdx !== -1) {
-      return Promise.resolve(false);
+    const key = this.__queryKey(buttressQuery, opts);
+    const paged = ButtressDataService.__isPaged(opts);
+    const generation = this.__pageGeneration;
+    const cached = this._queryCache.get(key);
+    if (!opts?.bust && cached && (!cached.paged || cached.generation === generation)) {
+      return false;
     }
 
     let sort: undefined | BJSSortOpt;
@@ -558,23 +532,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const newMapArrMap: [string, ButtressEntity][] = [];
 
     for (const o of body) {
-      // Check to see if o.id exsits within newMapArrMap, if it does merge them
       const idx = newMapArrMap.findIndex((n) => n[0] === o.id);
       if (idx !== -1) {
-        newMapArrMap[idx] = [o.id, {...newMapArrMap[idx][1], ...o}];
+        newMapArrMap[idx] = [o.id, { ...newMapArrMap[idx][1], ...o }];
         continue;
-      } else if (!this._store.get(`${this.name}.${o.id}`)) {
+      }
+      const existing = this._store.get(`${this.name}.${o.id}`);
+      if (!existing) {
         newMapArrMap.push([o.id, o]);
         continue;
       }
-
-      console.log('We have a update toe the existing datastore.');
+      newMapArrMap.push([o.id, { ...existing, ...o }]);
     }
 
     this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
-      silent: true
+      silent: true,
     });
-    this._queryMap.push(`${hash}`);
+    // The generation from when the search was sent, so a create while it was out makes this page stale.
+    this._queryCache.set(key, { ids: newMapArrMap.map(([id]) => id), paged, generation });
 
     return body;
   }
@@ -583,217 +558,58 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this.__generateCountRequest(buttressQuery, actualCount);
   }
 
-  _hashQuery(object: any) {
-    const str = this.name + JSON.stringify(object);
-
-    let hash = 0;
-    if (str.length === 0) return hash;
-    for (let i = 0; i < str.length; i += 1) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        // hash = hash & hash; // Convert to 32bit integer
-        hash &= hash; // Convert to 32bit integer
-    }
-
-    return hash;
-  }
-
   clearQueryMap() {
-    this._queryMap = [];
+    this._queryCache.clear();
   }
 
-  private __updateQueue(): undefined {
-    if (this._requestQueue.length === 0) {
-      this.__awaitIdleQueue.forEach((resolve) => resolve(true));
-      return;
-    };
-    if (this.status === 'working') return;
-    // TODO: Debounce method
-    this.__reduceRequests();
+  nextIdle(): Promise<boolean> {
+    return this._queue.nextIdle();
   }
-
-  async nextIdle(): Promise<boolean> {
-    return new Promise((r) => {
-      queueMicrotask(() => {
-        if (this._requestQueue.length === 0) {
-          r(true);
-          return;
-        };
-
-        this.__awaitIdleQueue.push(r);
-      })
-    });
-  }
-
-  // _generateListRequest(): Promise<void> {
-  //   return this.__queueRequest({
-  //     type: 'list',
-  //     url: this.getUrl(),
-  //     method: 'GET',
-  //   });
-  // }
 
   private __generateGetByIdRequest(entityId: string): Promise<ButtressEntity> {
-    return this.__queueRequest({
-      type: 'get',
-      url: this.getUrl(entityId),
-      method: 'GET',
-    });
+    return this._queue.push({ type: 'get', method: 'GET', url: this.getUrl(entityId), entityId });
   }
 
-  private __generateSearchRequest(query: any, limit: number = 0, skip: number = 0, sort: undefined | BJSSortOpt = undefined, project: any = undefined): Promise<ButtressEntity[]> {
-    return this.__queueRequest({
+  private __generateSearchRequest(
+    query: any,
+    limit: number = 0,
+    skip: number = 0,
+    sort: undefined | BJSSortOpt = undefined,
+    project: any = undefined,
+  ): Promise<ButtressEntity[]> {
+    return this._queue.push({
       type: 'search',
-      url: this.getUrl(),
       method: 'SEARCH',
-      contentType: 'application/json',
-      body: {
-        query,
-        limit,
-        skip,
-        sort,
-        project,
-      },
+      url: this.getUrl(),
+      body: { query, limit, skip, sort, project },
     });
   }
 
   private __generateRmRequest(entityId: string) {
-    return this.__queueRequest({
-      type: 'delete',
-      url: this.getUrl(entityId),
-      entityId,
-      method: 'DELETE',
-    });
+    return this._queue.push({ type: 'delete', method: 'DELETE', url: this.getUrl(entityId), entityId });
   }
 
   private __generateCountRequest(query: any, actualCount: boolean = false): Promise<number> {
-    return this.__queueRequest({
+    return this._queue.push({
       type: 'count',
-      url: this.getUrl('count'),
       method: 'SEARCH',
-      body: {
-        query,
-        actualCount,
-      },
+      url: this.getUrl('count'),
+      body: { query, actualCount },
     });
   }
 
   private __generateAddRequest(entity: any) {
-    return this.__queueRequest({
-      type: 'add',
-      url: this.getUrl(),
-      entityId: -1,
-      method: 'POST',
-      contentType: 'application/json',
-      body: entity
-    });
+    return this._queue.push({ type: 'add', method: 'POST', url: this.getUrl(), entityId: entity.id, body: entity });
   }
 
-  private __generateUpdateRequest(entityId: string, path: string, value: string | number): Promise<void> {
-    return this.__queueRequest({
+  private __generateUpdateRequest(entityId: string, path: string, value: unknown): Promise<void> {
+    return this._queue.push({
       type: 'update',
+      method: 'PUT',
       url: this.getUrl(entityId),
       entityId,
-      method: 'PUT',
-      contentType: 'application/json',
-      body: {
-        path,
-        value
-      }
+      body: { path, value },
     });
-  }
-
-  private __queueRequest(request: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-      request.resolve = resolve;
-      request.reject = reject;
-
-      this._requestQueue.push(request);
-      this.__updateQueue();
-    });
-  }
-
-  // eslint-disable-next-line class-methods-use-this
-  private __reduceRequests() {
-    this.status = 'working';
-
-    // Prioritise additions & deletions
-    const requestIdx = this._requestQueue.findIndex((r) => r.type === 'add' || r.type === 'delete');
-    let request = (requestIdx !== -1 && this.bundling) ? this._requestQueue.splice(requestIdx, 1).shift() : this._requestQueue.shift();
-
-    if (this.bundling && this.BUNDLED_REQUESTS_TYPES.includes(request.type)) {
-      this._logger.debug('bulk compatible request, trying to chunk:', request.type);
-
-      const requests = [
-        request,
-        ...this._requestQueue.filter((r) => r.type === request.type)
-          .splice(0, this.bundlingChunk - 1)
-      ];
-
-      if (requests.length > 1) {
-        this._requestQueue = this._requestQueue.filter((r) => !requests.includes(r));
-
-        request = {
-          type: `bulk/${request.type}`,
-          url: `${this.getUrl('bulk', request.type)}`,
-          entityId: -1,
-          method: 'POST',
-          contentType: 'application/json',
-          body: null,
-          dependentRequests: requests,
-          resolve: request.resolve,
-          reject: request.reject,
-        };
-
-        if (request.type === 'bulk/update') {
-          request.body = requests.map((rq) => ({
-            id: rq.entityId,
-            body: rq.body
-          }));
-
-          request.resolve = requests.map((rq) => rq.resolve);
-          request.reject = requests.map((rq) => rq.reject);
-        } else {
-          request.body = requests.map((rq) => rq.body);
-        }
-      }
-    }
-
-    // const request = this._requestQueue.shift();
-    return this.__generateRequest(request);
-  }
-
-  private async __generateRequest(request: any) {
-    const body = (request.body) ? JSON.stringify(request.body) : null;
-    try {
-      const response = await fetch(`${request.url}?urq=${Date.now()}`, {
-        method: request.method,
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this._settings.token}`,
-        },
-        body,
-      })
-
-      if (!response.ok) {
-        const responseData = await response.json();
-        const message = (responseData) ? responseData.message : '';
-        throw new Error(`DS ERROR [${request.type}] ${message} - ${response.status} ${request.url} - ${response.statusText}`);
-      }
-
-      this.status = 'done';
-      const data = await response.json();
-      if (request.resolve && !Array.isArray(request.resolve)) request.resolve(data);
-      if (request.resolve && Array.isArray(request.resolve)) request.resolve.forEach((rq: any) => rq(data));
-    } catch(err) {
-      // will only reject on network failure or if anything prevented the request from completing.
-      this._logger.error(err);
-
-      if (request.reject && !Array.isArray(request.reject)) request.reject(err);
-      this.status = 'error';
-    } finally {
-      this.__updateQueue();
-    }
   }
 
   getUrl(...parts: string[]) {

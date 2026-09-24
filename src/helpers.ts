@@ -13,30 +13,54 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
+import { v4 as uuidv4 } from 'uuid';
 
-import { LtnLogLevel } from '@lighten/ltn-element';
+import { LogLevel } from './Logger.js';
 
 export interface Settings {
-  [index: string]: string | undefined | string[] | LtnLogLevel;
+  [index: string]: string | undefined | string[] | LogLevel;
+
+  clientSessionId: string;
 
   endpoint?: string;
   token?: string;
   apiPath?: string;
   userId?: string;
   coreSchema?: string[];
-  logLevel?: LtnLogLevel;
-};
+  logLevel?: LogLevel;
+}
+
+export function buildSettings(settings: Partial<Settings>): Settings {
+  if (settings.clientSessionId) {
+    return settings as Settings;
+  }
+
+  return {
+    ...settings,
+    clientSessionId: uuidv4(),
+  };
+}
+
+// Buttress names most core schemas in the plural (users, activities) but routes them in the singular (user,
+// activity), and crag uses the singular name locally.
+export function coreSchemaLocalName(name: string): string {
+  if (name.endsWith('ies')) return `${name.slice(0, -3)}y`;
+  if (name.endsWith('s')) return name.slice(0, -1);
+  return name;
+}
 
 export function Camelize(str: string, upper?: boolean): string {
-  return str.replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => index === 0 && !upper ? word.toLowerCase() : word.toUpperCase()).replace(/\s+/g, '');
-};
+  return str
+    .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => (index === 0 && !upper ? word.toLowerCase() : word.toUpperCase()))
+    .replace(/\s+/g, '');
+}
 export function Dasherize(str: string): string {
   return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
 export function DateCreate(date: string | number | Date): Date {
   return new Date(date);
-};
+}
 export function DateIsEqual(date: Date, compare: Date): boolean {
   return date.getTime() === compare.getTime();
 }

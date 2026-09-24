@@ -16,70 +16,77 @@
 
 import { expect } from '@open-wc/testing';
 
-import ButtressDataService from '../../ButtressDataService';
-import ButtressStore from '../../ButtressStore.js';
-import ButtressSchema from '../../ButtressSchema';
+import ButtressDataService from '../../src/ButtressDataService.js';
+import ButtressStore from '../../src/ButtressStore.js';
+import ButtressSchema from '../../src/ButtressSchema.js';
 
 describe('processQueryPart', () => {
   const store = new ButtressStore();
-  const ds = new ButtressDataService('Unit Testing', false, {}, store, {} as ButtressSchema)
+  const ds = new ButtressDataService('Unit Testing', false, {}, store, {} as ButtressSchema);
   const data = [
     {
-      "publicLedger": {
-        "signatureRequirement": {
-            "threshold": 1,
-            "signatories": [
-                {
-                  "person": {
-                    "identifiers": [{
-                      "id": "6780ebbf068de140a2ba8c26",
-                      "name": "John",
-                      "age": 30,
-                      "hired_at": new Date("2010-01-10T00:00:00.000Z"),
-                    }, {
-                      "id": "6780ebbf068de140a2ba8c27",
-                      "name": "Mary",
-                      "age": 20,
-                      "hired_at": new Date("2020-07-04T00:00:00.000Z"),
-                    }]
+      publicLedger: {
+        signatureRequirement: {
+          threshold: 1,
+          signatories: [
+            {
+              person: {
+                identifiers: [
+                  {
+                    id: '6780ebbf068de140a2ba8c26',
+                    name: 'John',
+                    age: 30,
+                    hired_at: new Date('2010-01-10T00:00:00.000Z'),
                   },
-                  "publicKey": "302a300506032b6570032100763f8f38e913c44bbb389ef5f5bc67accc0b66dfce4fb790393a7a089e2b02dc"
-                }
-            ]
-        }
-      }
-    }, {
-      "publicLedger": {
-        "signatureRequirement": {
-            "threshold": 1,
-            "signatories": [
-                {
-                  "person": {
-                    "identifiers": [{
-                      "id": "6780ebbf068de140a2ba8c28",
-                      "name": "Henry",
-                      "age": 50,
-                      "hired_at": new Date("2023-10-31T00:00:00.000Z"),
-                    }, {
-                      "id": "6780ebbf068de140a2ba8c29",
-                      "name": "James",
-                      "age": 60,
-                      "hired_at": new Date("2009-03-14T00:00:00.000Z"),
-                    }]
+                  {
+                    id: '6780ebbf068de140a2ba8c27',
+                    name: 'Mary',
+                    age: 20,
+                    hired_at: new Date('2020-07-04T00:00:00.000Z'),
                   },
-                  "publicKey": "302a300506032b6570032100763f8f38e913c44bbb389ef5f5bc67accc0b66dfce4fb790393a7a089e2b02dc"
-                }
-            ]
-        }
-      }
-    }
+                ],
+              },
+              publicKey: '302a300506032b6570032100763f8f38e913c44bbb389ef5f5bc67accc0b66dfce4fb790393a7a089e2b02dc',
+            },
+          ],
+        },
+      },
+    },
+    {
+      publicLedger: {
+        signatureRequirement: {
+          threshold: 1,
+          signatories: [
+            {
+              person: {
+                identifiers: [
+                  {
+                    id: '6780ebbf068de140a2ba8c28',
+                    name: 'Henry',
+                    age: 50,
+                    hired_at: new Date('2023-10-31T00:00:00.000Z'),
+                  },
+                  {
+                    id: '6780ebbf068de140a2ba8c29',
+                    name: 'James',
+                    age: 60,
+                    hired_at: new Date('2009-03-14T00:00:00.000Z'),
+                  },
+                ],
+              },
+              publicKey: '302a300506032b6570032100763f8f38e913c44bbb389ef5f5bc67accc0b66dfce4fb790393a7a089e2b02dc',
+            },
+          ],
+        },
+      },
+    },
   ];
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $not', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.id": {
-        "$not": "6780ebbf068de140a2ba8c26"
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.id': {
+        $not: '6780ebbf068de140a2ba8c26',
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -98,9 +105,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with simple query for $eq', () => {
     const query = {
-      "publicLedger.signatureRequirement.threshold": {
-        "$eq": 1
-      }
+      'publicLedger.signatureRequirement.threshold': {
+        $eq: 1,
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -111,9 +118,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $eq', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.id": {
-        "$eq": "6780ebbf068de140a2ba8c26"
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.id': {
+        $eq: '6780ebbf068de140a2ba8c26',
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -132,14 +139,14 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $gt', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$gt": 100,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $gt: 100,
+      },
     };
     const secondQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$gt": 10,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $gt: 10,
+      },
     };
 
     const firstRes = ds._processQueryPart(firstQuery, data);
@@ -161,14 +168,14 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $lt', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$lt": 40,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $lt: 40,
+      },
     };
     const secondQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$lt": 10,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $lt: 10,
+      },
     };
 
     const firstRes = ds._processQueryPart(firstQuery, data);
@@ -190,9 +197,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $gte', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$gte": 50,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $gte: 50,
+      },
     };
 
     const res = ds._processQueryPart(firstQuery, data);
@@ -212,9 +219,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $lte', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.age": {
-        "$lte": 10,
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.age': {
+        $lte: 10,
+      },
     };
 
     const res = ds._processQueryPart(firstQuery, data);
@@ -224,9 +231,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $rex', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.name": {
-        "$rex": "h",
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.name': {
+        $rex: 'h',
+      },
     };
 
     const res = ds._processQueryPart(firstQuery, data);
@@ -247,9 +254,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $rexi', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.name": {
-        "$rexi": "M",
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.name': {
+        $rexi: 'M',
+      },
     };
 
     const res = ds._processQueryPart(firstQuery, data);
@@ -270,9 +277,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $in', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.id": {
-        "$in": ["6780ebbf068de140a2ba8c26"]
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.id': {
+        $in: ['6780ebbf068de140a2ba8c26'],
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -291,13 +298,13 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $nin', () => {
     const firstQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.id": {
-        "$nin": ["6780ebbf068de140a2ba8c26", "6780ebbf068de140a2ba8c28"],
+      'publicLedger.signatureRequirement.signatories.person.identifiers.id': {
+        $nin: ['6780ebbf068de140a2ba8c26', '6780ebbf068de140a2ba8c28'],
       },
     };
     const secondQuery = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.id": {
-        "$nin": ["6780ebbf068de140a2ba8c30", "6780ebbf068de140a2ba8c31"],
+      'publicLedger.signatureRequirement.signatories.person.identifiers.id': {
+        $nin: ['6780ebbf068de140a2ba8c30', '6780ebbf068de140a2ba8c31'],
       },
     };
 
@@ -316,65 +323,30 @@ describe('processQueryPart', () => {
       return arr;
     }, []);
 
-    expect(values.every((v => v !== '6780ebbf068de140a2ba8c30' && v !== '6780ebbf068de140a2ba8c31'))).to.be.true
+    expect(values.every((v) => v !== '6780ebbf068de140a2ba8c30' && v !== '6780ebbf068de140a2ba8c31')).to.be.true;
   });
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $exists', () => {
-    const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.name": {
-        "$exists": "John"
-      }
-    };
+    const path = 'publicLedger.signatureRequirement.signatories.person.identifiers';
 
-    const res = ds._processQueryPart(query, data);
-    expect(res).to.be.an('array');
-    expect(res.length).to.equal(1);
-
-    const values = res.reduce((arr: string[], i) => {
-      const signatories = i.publicLedger.signatureRequirement.signatories.map((s: any) => s.person);
-      const identifiers = signatories.map((s: any) => s.identifiers).flat();
-      const names = identifiers.map((i: any) => i.name);
-      arr = arr.concat(names).filter((v, idx, arr) => arr.indexOf(v) === idx);
-      return arr;
-    }, []);
-
-    expect(values.some((v) => v === 'John')).to.be.true;
-  });
-
-  it('Validate ButtressDataService _processQueryPart works with nested arrays in $exists', () => {
-    const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.name": {
-        "$exists": "John"
-      }
-    };
-
-    const res = ds._processQueryPart(query, data);
-    expect(res).to.be.an('array');
-    expect(res.length).to.equal(1);
-
-    const values = res.reduce((arr: string[], i) => {
-      const signatories = i.publicLedger.signatureRequirement.signatories.map((s: any) => s.person);
-      const identifiers = signatories.map((s: any) => s.identifiers).flat();
-      const names = identifiers.map((i: any) => i.name);
-      arr = arr.concat(names).filter((v, idx, arr) => arr.indexOf(v) === idx);
-      return arr;
-    }, []);
-
-    expect(values.some((v) => v === 'John')).to.be.true;
+    expect(ds._processQueryPart({ [`${path}.name`]: { $exists: true } }, data).length).to.equal(2);
+    expect(ds._processQueryPart({ [`${path}.name`]: { $exists: false } }, data).length).to.equal(0);
+    expect(ds._processQueryPart({ [`${path}.email`]: { $exists: true } }, data).length).to.equal(0);
+    expect(ds._processQueryPart({ [`${path}.email`]: { $exists: false } }, data).length).to.equal(2);
   });
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $elMatch', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers": {
-        "$elMatch": {
-          "name": {
-            "$eq": "John",
+      'publicLedger.signatureRequirement.signatories.person.identifiers': {
+        $elMatch: {
+          name: {
+            $eq: 'John',
           },
-          "age": {
-            "$lt": 40,
+          age: {
+            $lt: 40,
           },
         },
-      }
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -385,7 +357,7 @@ describe('processQueryPart', () => {
       const signatories = i.publicLedger.signatureRequirement.signatories.map((s: any) => s.person);
       const identifiers = signatories.map((s: any) => s.identifiers).flat();
       const obj = identifiers.map((i: any) => {
-        return {name:i.name, age: i.age};
+        return { name: i.name, age: i.age };
       });
       arr = arr.concat(obj);
       return arr;
@@ -396,9 +368,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $gtDate', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.hired_at": {
-        "$gtDate": "2022-01-01T00:00:00.000Z",
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.hired_at': {
+        $gtDate: '2022-01-01T00:00:00.000Z',
+      },
     };
 
     const res = ds._processQueryPart(query, data);
@@ -408,9 +380,9 @@ describe('processQueryPart', () => {
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $ltDate', () => {
     const query = {
-      "publicLedger.signatureRequirement.signatories.person.identifiers.hired_at": {
-        "$ltDate": "2010-01-20T00:00:00.000Z",
-      }
+      'publicLedger.signatureRequirement.signatories.person.identifiers.hired_at': {
+        $ltDate: '2010-01-20T00:00:00.000Z',
+      },
     };
 
     const res = ds._processQueryPart(query, data);

@@ -1,76 +1,448 @@
-# \<buttress-db-service>
+# Buttress Crag
 
-This webcomponent follows the [open-wc](https://github.com/open-wc/open-wc) recommendation.
+[![CI](https://img.shields.io/github/actions/workflow/status/datapeopleconnected/crag/ci.yml?branch=main&label=CI)](https://github.com/datapeopleconnected/crag/actions/workflows/ci.yml?query=branch%3Amain)
+[![npm](https://img.shields.io/npm/v/@buttress/crag)](https://www.npmjs.com/package/@buttress/crag)
+[![Licence](https://img.shields.io/npm/l/@buttress/crag)](LICENSE)
+
+`@buttress/crag` connects a browser app to a Buttress server. It provides one headless web component,
+`<buttress-db-service>`, built with [Lit](https://lit.dev). The component:
+
+- loads your app's schemas and keeps a local store of the entities you work with;
+- sends your changes to Buttress, batching them where it can;
+- applies changes made by other clients, which arrive over a realtime socket;
+- provides itself to the components inside it through [`@lit/context`](https://lit.dev/docs/data/context/).
+
+Upgrading from 0.0.x? Follow the [migration guide](docs/migrating-to-0.1.md).
 
 ## Installation
 
 ```bash
-npm i buttress-db-service
+npm install @buttress/crag
 ```
 
-## Usage
+The package includes a [Custom Elements Manifest](https://custom-elements-manifest.open-wc.org/)
+(`custom-elements.json`), so editors and documentation tools can describe the element's attributes, events and slot.
+
+crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
+
+crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
+Node 24 or newer; see [Development](#development).
+
+## Quick start
+
+**1. Wrap the part of your app that uses the database in the element, and connect.**
 
 ```html
+<buttress-db-service endpoint="https://buttress.example.com" token="APP_TOKEN" api-path="my-app">
+  <organisation-list></organisation-list>
+</buttress-db-service>
+
 <script type="module">
-  import 'buttress-db-service/buttress-db-service.js';
+  import '@buttress/crag/components/buttress-db-service.js';
+
+  await document.querySelector('buttress-db-service').connect();
 </script>
-
-<buttress-db-service></buttress-db-service>
 ```
 
-## Linting and formatting
+The element shows its children through a slot and takes up no space in the layout (`display: contents`).
 
-To scan the project for linting and formatting errors, run
+**2. Use it from the components inside.**
+
+```ts
+import { LitElement, html } from 'lit';
+import { state } from 'lit/decorators.js';
+import { consume } from '@lit/context';
+import { buttressDbServiceContext, type ButtressDbService, type ButtressEntity } from '@buttress/crag';
+
+class OrganisationList extends LitElement {
+  @consume({ context: buttressDbServiceContext })
+  db?: ButtressDbService;
+
+  @state()
+  private organisations: ButtressEntity[] = [];
+
+  async firstUpdated() {
+    if (!this.db) return;
+    await this.db.awaitConnection();
+    const { results } = await this.db.query('organisation', { status: { $eq: 'active' } });
+    this.organisations = results;
+  }
+
+  render() {
+    return html`<ul>${this.organisations.map((organisation) => html`<li>${organisation.name}</li>`)}</ul>`;
+  }
+}
+customElements.define('organisation-list', OrganisationList);
+```
+
+## How it works
+
+- `connect()` fetches your app's schemas and creates a data service for each one, then opens the realtime socket.
+  `awaitConnection()` resolves once the schemas have loaded. Calling `connect()` again replaces the socket.
+  Removing the element closes the socket, and adding it back (or moving it) opens it again.
+- Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
+  loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
+- Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a
+  time, and additions and updates are combined into bulk requests of up to 100.
+- Changes made by other clients arrive over the realtime socket and are applied to the store. Each
+  `<buttress-db-service>` has its own session id, so crag ignores realtime messages about its own changes.
+- `subscribe()` calls you back when paths in the store change.
+
+## Getting the service in a component
+
+`<buttress-db-service>` answers context requests from any element inside it, including elements in shadow roots. If
+there's more than one `<buttress-db-service>` above a component, the nearest one answers.
+
+- **Timing.** A component receives the service when it connects, provided `buttress-db-service` is already defined, so
+  import `@buttress/crag/components/buttress-db-service.js` before your own components. If you can't guarantee that,
+  attach a `ContextRoot` and consume with `subscribe: true`. The root holds on to early requests and answers them once
+  the element is defined, but only requests that subscribe:
+
+  ```ts
+  import { ContextRoot } from '@lit/context';
+
+  new ContextRoot().attach(document.body);
+  ```
+
+- **Moving components.** A component that can move from one `<buttress-db-service>` to another should use
+  `@consume({ context: buttressDbServiceContext, subscribe: true })`. Otherwise it keeps the first service it received.
+- **Keeping the element beside your content.** Provide it from a common ancestor instead; the
+  [migration guide](docs/migrating-to-0.1.md#option-b-provide-it-from-your-root-element) shows how.
+- **Without Lit.** Look the element up with `document.querySelector('buttress-db-service')`, or dispatch a
+  `ContextEvent` as the [migration guide](docs/migrating-to-0.1.md#3-replace-_getservice-with-consume) shows.
+- **TypeScript.** If you use `experimentalDecorators`, set `useDefineForClassFields: false`, as Lit requires for
+  decorated fields.
+
+## Attributes
+
+| Attribute     | Property     | Description                                                                                                                                                 |
+| ------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`    | `endpoint`   | Base URL of the Buttress server. Required by `connect()`.                                                                                                   |
+| `token`       | `token`      | Token sent with every request and used to open the realtime socket. Required.                                                                               |
+| `api-path`    | `apiPath`    | Your app's API path on the server. Required.                                                                                                                |
+| `userid`      | `userId`     | Id of the signed-in user, returned by `getUserId()`. crag doesn't use it itself. |
+| `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names are singular: `users` becomes `user`, and `activities` becomes `activity`. |
+| `loglevel`    | `logLevel`   | `error`, `warn`, `info` (the default), `debug` or `sys`. Applies to the element, the store, the data services and the realtime connection.                  |
+| `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
+| `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |
+
+The connection settings are copied when the element connects and whenever they change. When the element connects, an
+unset attribute leaves its setting alone, so a value set with `setEndpoint()` or the other setters survives the element
+being moved. A change made after `connect()` applies to later requests but doesn't reconnect the realtime socket. The
+logging attributes are read when the element connects.
+
+## API
+
+The data methods need the schemas, so call them after `awaitConnection()`. `subscribe()` and `unsubscribe()` work at
+any time.
+
+### Connection
+
+| Method                                | Description                                                                                                                |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `connect(): Promise<void>`            | Loads the schemas, creates the data services, then opens the realtime socket. Rejects if `endpoint`, `token` or `api-path` is missing. |
+| `awaitConnection(): Promise<boolean>` | Resolves once `connect()` has loaded the schemas. Can be called before `connect()`. Rejects with the same error if that `connect()` fails; called after a failure, it waits for the next `connect()`. |
+| `isDbConnected(): boolean`            | Whether the schemas have loaded.                                                                                           |
+
+### Reading
+
+| Method                               | Description                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `get(path)`                          | Reads from the local store. Returns `undefined` for anything that isn't loaded.                        |
+| `query(schema, query, opts?)`        | Loads matching entities into the store and resolves to `{ total, results, skip, limit }`. See [Queries](#queries). |
+| `getById(schema, id)`                | Resolves to the entity, from the store if it's loaded and from Buttress if not.                        |
+| `count(schema, query, actualCount?)` | Resolves to the number of matching entities, as counted by Buttress.                                    |
+| `getSchema(name)`                    | The schema definition, or `false` if there's no such schema.                                            |
+
+### Writing
+
+| Method                                        | Description                                                                                                                                         |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. |
+| `create(schema, entity, opts?)`               | Adds the entity to the store and to Buttress, generating an `id` if it has none. Returns its path, e.g. `organisation.6709476b082b32233234259c`. |
+| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
+| `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
+| `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
+| `pushWith(path, opts, ...items)`              | `push` with options. The options come before the items, since an item can be an object too.                                                        |
+| `spliceWith(path, start, deleteCount, opts, ...items)` | `splice` with options, before the items as for `pushWith`.                                                                                 |
+| `delete(path, opts?)`                         | Deletes an entity: `delete('organisation.<id>')`. Returns whether it was in the store.                                                             |
+| `nextIdle(schema)`                            | Resolves once that schema has no requests queued or waiting for a response from Buttress. It also waits for requests queued in the meantime. |
+
+Before you write:
+
+- `set`, `push` and `splice` only work inside entities that are already in the store: queried, fetched or created.
+- Buttress can append to an array and remove from it, but not insert into the middle. So `push`, and a `splice` that
+  only adds at the end, send each added item; a `splice` that only removes sends each removal; and any other `splice`
+  sends the whole new array, which overwrites any change someone else makes to that array at the same time.
+- Objects added to an array are given an `id` if they don't have one.
+- `create` and `delete` work on whole entities: `create` takes a schema name and `delete` takes `<schema>.<id>`.
+
+`create`, `set`, `delete`, `pushWith` and `spliceWith` take these options:
+
+| Option                             | Effect                                                                                                    |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `wait`                             | Returns a promise of the usual result, which resolves once Buttress has accepted the write and rejects with a [`ButtressError`](#errors) if it doesn't. The store still changes straight away. |
+| `localOnly`                        | Changes the store without sending anything to Buttress.                                                   |
+| `silent`                           | Doesn't notify subscribers, and sends nothing to Buttress.                                                |
+| `forceChanged`                     | Notifies subscribers even if the value hasn't changed, and sends nothing to Buttress.                     |
+| `dboComplete: { resolve, reject }` | Called when the request to Buttress finishes, or straight away if nothing is sent.                        |
+
+To wait until a change has reached Buttress:
+
+```ts
+await db.set(`${path}.name`, 'New name', { wait: true });
+const length = await db.pushWith(`${path}.tags`, { wait: true }, 'new-tag');
+```
+
+A write that isn't sent resolves straight away. An invalid call, such as creating an entity whose `id` is already in
+the store, still throws rather than returning a promise.
+
+### Subscribing
+
+| Method                        | Description                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| `subscribe(paths, callback)`  | Calls `callback` when any of the comma-separated `paths` change. Returns an id.      |
+| `unsubscribe(id)`             | Removes the subscription. Returns whether it existed.                                |
+
+A path can be:
+
+- `organisation.*`: anything in the `organisation` schema;
+- `organisation.<id>.name`: that property, including when the whole entity is replaced;
+- `organisation`: the collection itself, when it's replaced.
+
+The callback receives one change record for each path you subscribed to, in the same order. For a path ending in `.*`
+the record is `{ path, value, base, opts }`, where `path` is what changed and `base` is the schema's `Map`. For other
+paths it's `{ value, opts }`. An array change arrives as `<path>.splices`, with the changes in `value.indexSplices`.
+Deleting an entity arrives as `<schema>.<id>.splices`, with the entity in `value.indexSplices[0].removed`.
+
+```ts
+const id = db.subscribe('organisation.*', ({ path, value }) => {
+  console.log(`${path} is now`, value);
+});
+
+db.unsubscribe(id);
+```
+
+Callbacks run in a microtask, after the store has changed. Entities loaded by `query()` and `getById()` are added to
+the store without notifying subscribers, so use the values those methods return.
+
+### Settings
+
+`getEndpoint()`, `setEndpoint()`, `getToken()`, `setToken()`, `setApiPath()`, `getUserId()`, `setUserId()`,
+`getCoreSchemas()` and `setCoreSchemas()` read and change the connection settings. As with the attributes, a change
+applies to later requests and doesn't reconnect.
+
+### App administration
+
+These call Buttress's app-management endpoints for the app identified by `apiPath`, so the token needs permission to
+use them. Each one rejects with a [`ButtressError`](#errors) if Buttress responds with an error.
+
+| Method                                                     | Resolves to              |
+| ---------------------------------------------------------- | ------------------------ |
+| `addSchema(apiPath, schema)`                               | `true`                   |
+| `updateAppPolicySelectors(apiPath, policySelectors)`       | `true`                   |
+| `addLambda(lambda, auth, apiPath)`                         | `true`                   |
+| `deployLambda(lambda, apiPath)`                            | `true`. Deploys `lambda.git.branch` at `lambda.git.hash`. |
+| `addDataSharing(appDataSharing, apiPath)`                  | The remote app's token   |
+| `activateDataSharing(dataSharingId, apiPath, remoteToken)` | `true`                   |
+
+### Errors
+
+When Buttress responds with an error status, crag rejects with a `ButtressError`. That covers `connect()`,
+`awaitConnection()`, queries, `getById()`, `count()` and the app administration methods. Writes report it through
+`dboComplete.reject`. A request that gets no response at all, for example because the network is down, rejects with
+the browser's own error instead.
+
+```ts
+import { ButtressError } from '@buttress/crag';
+
+try {
+  await db.addSchema('my-app', schema);
+} catch (err) {
+  if (err instanceof ButtressError && err.status === 403) {
+    // The token can't change this app's schema.
+  }
+}
+```
+
+| Property        | Description                                                                  |
+| --------------- | ---------------------------------------------------------------------------- |
+| `status`        | The HTTP status Buttress responded with.                                     |
+| `method`, `url` | The request, without its query string.                                       |
+| `serverMessage` | The message Buttress sent, or the status text if it didn't send one.         |
+
+## Queries
+
+A query maps paths to operators. Paths use dots and reach into nested objects and arrays. Combine conditions with
+`$and` and `$or`:
+
+```ts
+const active = await db.query('organisation', { status: { $eq: 'active' } }, { sort: { path: 'name', direction: 'ASC' } });
+
+const activeOrLarge = await db.query(
+  'organisation',
+  { $or: [{ status: { $eq: 'active' } }, { number: { $gte: 50 } }] },
+  { limit: 20 },
+);
+```
+
+`query()` sends the query to Buttress and merges what comes back into the store, and asks Buttress for the total. How
+it then chooses `results` depends on whether you ask for a page, with `limit` or `skip`.
+
+**Without `limit` or `skip`,** crag runs the query against everything in the store. So:
+
+- `results` includes matching entities that are only in the store, such as ones you've just created, and leaves out
+  ones you've changed so they no longer match;
+- `$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both,
+  sort the results yourself.
+
+**With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
+When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
+longer match, so a page can come back shorter than `limit`. Once an entity has been created in that schema, by you or
+by another client, the next call for a page searches again, because only Buttress knows which page the new entity
+belongs on. A search sent in the same tick as a `create()` can reach Buttress before the new entity does. Entities
+Buttress has that crag hasn't heard about appear once you pass `bust: true`.
+
+Either way:
+
+- `total` is Buttress's count, so it can differ from `results.length`;
+- running the same query again, with the same `limit`, `skip`, `sort` and `project`, doesn't fetch the entities again
+  unless you pass `bust: true`. The total is always requested.
+
+| Option        | Description                                                                        |
+| ------------- | ---------------------------------------------------------------------------------- |
+| `limit`       | Maximum number of results, applied by Buttress.                                    |
+| `skip`        | Number of results to skip, applied by Buttress.                                    |
+| `sort`        | `{ path, direction: 'ASC' \| 'DESC', type? }`, where `type` is `STRING` (the default), `NUMBER` or `DATE`. |
+| `project`     | Projection, applied by Buttress.                                                   |
+| `bust`        | Fetches even if this exact query has already run.                                 |
+| `actualCount` | Passed to Buttress with the count request.                                        |
+
+Buttress evaluates the query when fetching; crag evaluates it again locally to choose `results`. Locally, a path that
+passes through arrays can give several values, and an entity matches if any of them passes:
+
+| Operator                                     | Matches when a value at the path…                                           |
+| -------------------------------------------- | --------------------------------------------------------------------------- |
+| `$eq`                                        | equals the operand                                                          |
+| `$not`                                       | differs from the operand                                                    |
+| `$gt`, `$gte`, `$lt`, `$lte`                 | is greater than, at least, less than, or at most the operand                |
+| `$in`                                        | is in the operand array                                                     |
+| `$nin`                                       | is not in the operand array. Every value must pass this one.               |
+| `$rex`, `$rexi`                              | matches the regular expression. `$rexi` ignores case.                      |
+| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. `null` never matches. |
+| `$exists`                                    | is present, even if `null`, when the operand is `true`; is missing when it's `false`. |
+| `$elMatch`                                   | is an array with an element that matches the sub-query                     |
+| `$inProp`                                    | contains the operand. Top-level properties only.                           |
+
+An unknown operator logs an error and matches nothing.
+
+## Events
+
+Both events bubble and cross shadow roots.
+
+| Event                    | `detail`             | Fired                                                                                                                                  |
+| ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`).        |
+| `dataservice:loadById`   | `{ schemaName, id }` | When a realtime update arrives for an entity that isn't in the store. crag fetches the entity itself; the event is for information. |
+| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
+
+```ts
+db.addEventListener('bjs-connection-changed', (e) => {
+  const connected = (e as CustomEvent<boolean>).detail;
+});
+```
+
+## TypeScript
+
+`@buttress/crag` exports:
+
+| Export                     | What it is                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `ButtressDbService`        | The element's class.                                                              |
+| `buttressDbServiceContext` | The context to consume the service with.                                          |
+| `LogLevel`                 | The log level enum: `ERROR`, `WARN`, `INFO`, `DEBUG`, `SYS`.                      |
+| `ButtressEntity`           | An entity: `{ id: string; [key: string]: any }`.                                  |
+| `QueryResult`              | What `query()` resolves to.                                                       |
+| `CR`, `CRCallback`         | A change record, and the type of a subscriber callback.                           |
+| `Settings`                 | The connection settings.                                                          |
+
+Importing `@buttress/crag` doesn't register the element; import `@buttress/crag/components/buttress-db-service.js` for
+that.
+
+## Development
+
+You'll need Node 24 or newer. If you use nvm, `nvm use` switches to the version in `.nvmrc`.
 
 ```bash
-npm run lint
+npm install
+npm run build
+npm run test:unit
 ```
 
-To automatically fix linting and formatting errors, run
+| Path                    | Contents                                                        |
+| ----------------------- | --------------------------------------------------------------- |
+| `src/`                  | Source. `src/components/` registers the element.                |
+| `test/unit/`            | Unit tests, run from source in Chrome.                          |
+| `test/e2e/`             | End-to-end tests, run in Chrome against Buttress in Docker.     |
+| `scripts/`              | Starts and seeds Buttress for the end-to-end tests.             |
+| `.docker/`              | The Buttress stack the end-to-end tests run against.            |
+| `demo/`                 | The page `npm start` serves: connects to a Buttress and lists one schema's entities. |
+| `docs/`                 | Guides, such as the [0.1 migration guide](docs/migrating-to-0.1.md). |
+| `dist/`                 | Build output. It's published along with `src/` and the licence. |
+| `custom-elements.json`  | The Custom Elements Manifest, generated by `npm run build` and published. |
+
+| Script                        | What it does                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `npm start`                   | Builds, watches, and serves `demo/`.                                           |
+| `npm run build`               | Compiles `src/` to `dist/`, then runs `analyze`.                               |
+| `npm run analyze`             | Writes `custom-elements.json` from `src/`. See `custom-elements-manifest.config.mjs`. |
+| `npm run test:unit`           | Runs the unit tests in Chrome. No build or server needed.                      |
+| `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
+| `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
+| `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
+| `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
+| `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
+| `npm run check`               | Runs `lint`, `format`, `typecheck` and `test:unit`.                            |
+| `npm run publint`             | Checks the packed package with publint and Are the Types Wrong.                |
+
+### End-to-end tests
+
+The end-to-end tests need [Docker](https://docs.docker.com/get-docker/) with Compose v2, and nothing else:
 
 ```bash
-npm run format
+npm test
 ```
 
-## Testing with Web Test Runner
+After building, `scripts/e2e.js` starts Buttress, MongoDB and Redis in containers, and seeds Buttress with a test app,
+policies, users and organisations (`scripts/e2e-seed.js`). It then runs the tests in Chrome and removes the containers.
+Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first.
 
-To execute a single test run:
+The first run downloads the images. Later runs check for a newer `dpcltd/buttress:develop` and fall back to the copy
+you have when Docker Hub can't be reached. To test against a different image, such as one built from a Buttress
+checkout, set `BUTTRESS_IMAGE`:
 
 ```bash
-npm run test
+docker build -t buttress:local path/to/buttress-js
+BUTTRESS_IMAGE=buttress:local npm test
 ```
 
-To run the tests in interactive watch mode run:
+`scripts/e2e.js` runs whatever command it's given, with the endpoint and tokens in `BUTTRESS_E2E_*` environment
+variables. To look around a seeded Buttress, open a shell with `node scripts/e2e.js bash`. The containers are removed
+when you exit it.
 
-```bash
-npm run test:watch
-```
+### Commits and publishing
 
-## Demoing with Storybook
+The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with ESLint and Prettier, then
+`npm run build` and `npm run licence-check`. Every file in `src/`, `test/` and `scripts/`,
+apart from HTML and JSON, must start with the header in `.husky/licencing_header.txt`.
 
-To run a local instance of Storybook for your component, run
+`npm pack` and `npm publish` build the package first. Run `npm run publint` beforehand to check its exports and types.
 
-```bash
-npm run storybook
-```
+## Security
 
-To build a production version of Storybook, run
+Please report vulnerabilities privately, as [SECURITY.md](SECURITY.md) explains, not in a public issue.
 
-```bash
-npm run storybook:build
-```
+## Licence
 
-
-## Tooling configs
-
-For most of the tools, the configuration is in the `package.json` to reduce the amount of files in your project.
-
-If you customize the configuration a lot, you can consider moving them to individual files.
-
-## Local Demo with `web-dev-server`
-
-```bash
-npm start
-```
-
-To run a local development server that serves the basic demo located in `demo/index.html`
+Buttress Crag is free software, released under the [GNU Affero General Public Licence v3.0 or later](LICENSE).
+Copyright © 2016–2024 Data People Connected LTD.

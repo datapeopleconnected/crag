@@ -17,7 +17,7 @@
 import { html } from 'lit';
 import { fixture, expect } from '@open-wc/testing';
 
-import { ButtressDbService } from '@buttress/crag';
+import { ButtressDbService, ButtressError } from '@buttress/crag';
 import '@buttress/crag/components/buttress-db-service.js';
 
 describe('ButtressDbService', () => {
@@ -33,17 +33,21 @@ describe('ButtressDbService', () => {
   console.log('TEST_USER2_TOKEN', TEST_USER2_TOKEN);
 
   it('should be isDbConnected is false by default', async () => {
-    const el: ButtressDbService = await fixture(html`<buttress-db-service></buttress-db-service>`);
+    const el: ButtressDbService = await fixture(html`
+      <buttress-db-service></buttress-db-service>
+    `);
 
     expect(el.isDbConnected()).to.equal(false);
   });
 
   it('should connect to a db instance', async () => {
-    db = await fixture(html`<buttress-db-service
-      endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-      token="${TEST_APP_TOKEN}"
-      api-path="test"
-    ></buttress-db-service>`);
+    db = await fixture(html`
+      <buttress-db-service
+        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+        token="${TEST_APP_TOKEN}"
+        api-path="test"
+      ></buttress-db-service>
+    `);
 
     await db.connect();
 
@@ -81,8 +85,8 @@ describe('ButtressDbService', () => {
   it('should remove some data', async () => {
     if (entityPath === undefined) throw new Error('entityPath is undefined');
 
-    // Wait some time to make sure the data was networked.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Without wait, nextIdle is how to know the writes above have reached Buttress.
+    await db.nextIdle('organisation');
 
     const res = db.delete(entityPath);
     expect(res).to.equal(true);
@@ -91,13 +95,64 @@ describe('ButtressDbService', () => {
     expect(value).to.equal(undefined);
   });
 
+  describe('awaiting writes', () => {
+    let awaitedPath: string | undefined;
+
+    // count() always asks Buttress, so it shows what Buttress has rather than what's in the local store.
+    const countNamed = (name: string) => db.count('organisation', { name: { $eq: name } });
+
+    it('should resolve a create once Buttress has the entity', async () => {
+      const payload = db.createObject('organisation');
+      payload.name = 'Awaited Org';
+      payload.number = 456;
+      payload.status = 'active';
+
+      awaitedPath = await db.create('organisation', payload, { wait: true });
+
+      expect(awaitedPath).to.match(/organisation\.[a-f0-9]{24}/);
+      expect(await countNamed('Awaited Org')).to.equal(1);
+    });
+
+    it('should resolve a set once Buttress has the change', async () => {
+      if (awaitedPath === undefined) throw new Error('awaitedPath is undefined');
+
+      await db.set(`${awaitedPath}.name`, 'Awaited Org 2', { wait: true });
+
+      expect(await countNamed('Awaited Org 2')).to.equal(1);
+    });
+
+    it('should resolve a delete once Buttress has removed the entity', async () => {
+      if (awaitedPath === undefined) throw new Error('awaitedPath is undefined');
+
+      expect(await db.delete(awaitedPath, { wait: true })).to.equal(true);
+
+      expect(await countNamed('Awaited Org 2')).to.equal(0);
+    });
+
+    it('should reject a write that Buttress rejects', async () => {
+      // number and status are required, so Buttress refuses the entity.
+      const payload = db.createObject('organisation');
+      payload.name = 'Incomplete Org';
+      delete payload.number;
+      delete payload.status;
+
+      const err = await db.create('organisation', payload, { wait: true }).catch((e: unknown) => e);
+
+      expect(err).to.be.instanceOf(ButtressError);
+      expect((err as ButtressError).status).to.equal(400);
+      expect(await countNamed('Incomplete Org')).to.equal(0);
+    });
+  });
+
   describe('Policy', () => {
-    it ('should connect and have access to all the records but no number property', async () => {
-      const db1: ButtressDbService = await fixture(html`<buttress-db-service
-        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-        token="${TEST_USER1_TOKEN}"
-        api-path="test"
-      ></buttress-db-service>`);
+    it('should connect and have access to all the records but no number property', async () => {
+      const db1: ButtressDbService = await fixture(html`
+        <buttress-db-service
+          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+          token="${TEST_USER1_TOKEN}"
+          api-path="test"
+        ></buttress-db-service>
+      `);
 
       await db1.connect();
 
@@ -108,12 +163,14 @@ describe('ButtressDbService', () => {
       expect(queryCall.results).to.be.an('array');
     });
 
-    it ('should connect and have access to all the records but no status property', async () => {
-      const db2: ButtressDbService = await fixture(html`<buttress-db-service
-        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-        token="${TEST_USER2_TOKEN}"
-        api-path="test"
-      ></buttress-db-service>`);
+    it('should connect and have access to all the records but no status property', async () => {
+      const db2: ButtressDbService = await fixture(html`
+        <buttress-db-service
+          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+          token="${TEST_USER2_TOKEN}"
+          api-path="test"
+        ></buttress-db-service>
+      `);
 
       await db2.connect();
 

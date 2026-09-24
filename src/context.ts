@@ -13,14 +13,9 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
+import { createContext } from '@lit/context';
 
-import type { ButtressSchemaProperties } from './ButtressSchemaProperties.js';
+import type { ButtressDbService } from './ButtressDbService.js';
 
-export type ButtressSchemaProperty = {
-  __type: string;
-  __default?: any;
-  __required?: boolean;
-  __allowUpdate?: boolean;
-  __enum?: string[];
-  __schema?: ButtressSchemaProperties;
-};
+// Symbol.for so the key still matches if an app ends up with two copies of this package.
+export const buttressDbServiceContext = createContext<ButtressDbService>(Symbol.for('@buttress/crag:db-service'));

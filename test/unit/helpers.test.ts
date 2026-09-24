@@ -14,13 +14,30 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import type { ButtressSchemaProperties } from './ButtressSchemaProperties.js';
+import { expect } from '@open-wc/testing';
 
-export type ButtressSchemaProperty = {
-  __type: string;
-  __default?: any;
-  __required?: boolean;
-  __allowUpdate?: boolean;
-  __enum?: string[];
-  __schema?: ButtressSchemaProperties;
-};
+import { coreSchemaLocalName } from '../../src/helpers.js';
+
+describe('coreSchemaLocalName', () => {
+  it('drops the s from plural names', () => {
+    expect(['users', 'apps', 'tokens', 'trackings'].map(coreSchemaLocalName)).to.deep.equal([
+      'user',
+      'app',
+      'token',
+      'tracking',
+    ]);
+  });
+
+  it('turns ies into y', () => {
+    expect(coreSchemaLocalName('activities')).to.equal('activity');
+  });
+
+  it('leaves singular names alone', () => {
+    expect(['lambda', 'policy', 'deployment', 'secureStore'].map(coreSchemaLocalName)).to.deep.equal([
+      'lambda',
+      'policy',
+      'deployment',
+      'secureStore',
+    ]);
+  });
+});

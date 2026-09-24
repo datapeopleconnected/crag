@@ -14,22 +14,21 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import {io} from 'socket.io-client';
+import { io } from 'socket.io-client';
 
-import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
+import { Logger, LogLevel } from './Logger.js';
 
-import {customButtressStoreInterface, EventDataDataServiceLoadById} from "./ButtressDbService.js";
+import { customButtressStoreInterface, EventDataDataServiceLoadById } from './ButtressDbService.js';
 
-import {Settings, Camelize} from './helpers.js';
+import { Settings, Camelize } from './helpers.js';
 
 interface PathParts {
-  collectionName: string,
-  id: string,
-};
+  collectionName: string;
+  id: string;
+}
 
 export default class ButtressDataRealtime {
-
-  private _logger: LtnLogger;
+  private _logger: Logger;
 
   private _store: customButtressStoreInterface;
 
@@ -37,28 +36,30 @@ export default class ButtressDataRealtime {
 
   private _socket: any;
 
-  private _synced: boolean = false;
+  private _dispatchCustomEvent: (type: string, init: CustomEventInit) => void;
 
-  private _lastSequence: {[key: string]: number} = {};
-
-  private _dispatchCustomEvent: Function;
+  private _loadById: (detail: EventDataDataServiceLoadById) => void;
 
   private _isConnected: boolean = false;
 
-  private readonly _rxEvents: string[] = [
-    'db-activity',
-    'clear-local-db',
-    'db-connect-room',
-    'db-disconnect-room',
-  ];
+  // Survives replacing the socket: updates sent while this instance had no connection are lost either way.
+  private _hasConnected: boolean = false;
 
-  constructor(store: customButtressStoreInterface, settings: Settings, dispatchCustomEvent: Function) {
+  private readonly _rxEvents: string[] = ['db-activity'];
+
+  constructor(
+    store: customButtressStoreInterface,
+    settings: Settings,
+    dispatchCustomEvent: (type: string, init: CustomEventInit) => void,
+    loadById: (detail: EventDataDataServiceLoadById) => void,
+  ) {
     this._store = store;
     this._settings = settings;
 
-    this._logger = new LtnLogger('buttress-data-realtime');
+    this._logger = new Logger('buttress-data-realtime');
 
     this._dispatchCustomEvent = dispatchCustomEvent;
+    this._loadById = loadById;
   }
 
   connect() {
@@ -66,24 +67,29 @@ export default class ButtressDataRealtime {
       throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
     }
     if (!this._settings?.token) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect`);
+      throw new Error(`Missing setting 'token' while trying to connect`);
     }
 
-    const uri = (this._settings?.apiPath) ? `${this._settings.endpoint}/${this._settings.apiPath}` : this._settings.endpoint;
+    const uri = this._settings?.apiPath
+      ? `${this._settings.endpoint}/${this._settings.apiPath}`
+      : this._settings.endpoint;
+
+    // Calling connect() again replaces the socket rather than leaving the old one open.
+    this.disconnect();
 
     this._logger.debug(`Opening connection to ${uri}`);
 
     this._dispatchCustomEvent('bjs-connection-changed', {
       detail: true,
       bubbles: true,
-      composed: true
+      composed: true,
     });
 
     try {
       this._socket = io(uri, {
         query: {
-          token: this._settings.token
-        }
+          token: this._settings.token,
+        },
       });
       this._socket.on('connect', () => this._onConnected());
       this._socket.on('disconnect', () => this._onDisconnected());
@@ -94,25 +100,50 @@ export default class ButtressDataRealtime {
     }
   }
 
+  get isOpen(): boolean {
+    return Boolean(this._socket);
+  }
+
+  disconnect() {
+    if (!this._socket) return;
+
+    this._logger.debug(`Closing connection`);
+    this._socket.disconnect();
+    this._socket = null;
+  }
+
   set _connected(state: boolean) {
     this._isConnected = state;
     this._logger.debug(state ? `Connected` : `Disconnected`);
     this._dispatchCustomEvent('bjs-connection-changed', {
       detail: state,
       bubbles: true,
-      composed: true
+      composed: true,
     });
   }
 
   private _onConnected() {
     this._connected = true;
+    if (this._hasConnected) this._resync();
+    this._hasConnected = true;
+  }
+
+  // Buttress can't replay the updates sent while there was no connection, so cached queries are
+  // searched for again, and the app is told so it can reload what it's showing.
+  private _resync() {
+    this._logger.debug(`Resyncing after a reconnection`);
+    this._store.clearQueryMaps();
+    this._dispatchCustomEvent('bjs-resync', {
+      bubbles: true,
+      composed: true,
+    });
   }
 
   private _onDisconnected() {
     this._connected = false;
   }
 
-  setLogLevel(level: LtnLogLevel) {
+  setLogLevel(level: LogLevel) {
     this._logger.level = level;
   }
 
@@ -122,100 +153,48 @@ export default class ButtressDataRealtime {
     });
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  private _handleRxEvent(type:string, payload: any) {
+  private _handleRxEvent(type: string, payload: any) {
     this._logger.debug(`RX Event type:${type} `, payload);
-    if (type === 'db-connect-room') {
-      this._loadAccessControlData(payload);
-    } else if (type === 'db-disconnect-room') {
-      this._clearAccessControlQueryHash(payload);
-    } else if (type === 'clear-local-db') {
-      // this._clearUserLocaldata(data);
-      // Do stuff
-    } else if (type === 'db-activity') {
-      // Do stuff
+    if (type === 'db-activity') {
       this._dbActivity(payload);
-    } else {
-      // Log out somthing
     }
   }
 
   private _dbActivity(payload: any) {
-    const lastSequence = this._lastSequence[payload.room];
-
-    if (lastSequence) {
-      if (lastSequence === payload.sequence) {
-        this._synced = false;
-      }
-      if (lastSequence + 1 !== payload.sequence) {
-        this._synced = false;
-      }
-    }
-
-    if (this._settings?.userId !== payload.data.user || payload.isSameApp === false) {
+    // Skip our own changes, which are already in the store, but not ones shared from another app.
+    if (this._settings.clientSessionId !== payload.data.clientSessionId || payload.data.isSameApp === false) {
       this._parsePayload(payload.data);
     }
-
-    this._lastSequence[payload.room] = payload.sequence;
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  private async _loadAccessControlData(payload: any) {
-    const userId = this._settings?.userId;
-    const apiPath = this._settings?.apiPath;
-    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
-
-    const {collections} = payload;
-    if (!collections || (collections && collections.length < 1)) return;
-
-    for await (const collection of collections) {
-      this._store.notifyPath(collection, undefined, {forceChanged: true});
-    }
-
-    this._lastSequence[payload.room] = 0;
-  }
-
-  // eslint-disable-next-line class-methods-use-this
-  private async _clearAccessControlQueryHash(payload: any) {
-    const userId = this._settings?.userId;
-    const apiPath = this._settings?.apiPath;
-    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
-
-    const {collections} = payload;
-    if (!collections || (collections && collections.length < 1)) return;
-
-    for await (const collection of collections) {
-      this._store.clearQueryMap(collection);
-    }
-
-    this._lastSequence[payload.room] = 0;
-  }
-
-  // eslint-disable-next-line class-methods-use-this
   private _parsePayload(data: any) {
-    const {response} = data;
+    const { response } = data;
     // if (response && typeof response === 'object') {
     //   response.__readonly__ = true;
     // }
 
-    const schemaName = data.schemaName;
-    const pathSpec = data.pathSpec.split('/').map((ps: string) => Camelize(ps, false)).filter((s: string) => s && s !== '');
+    // Buttress sends a core schema's own name (users), which crag stores under its local name (user).
+    const schemaName = this._store.localName(data.schemaName);
+    if (!schemaName) {
+      this._logger.debug(`__parsePayload: No data service for ${data.schemaName}`);
+      return;
+    }
+
+    const pathSpec = data.pathSpec
+      .split('/')
+      .map((ps: string) => Camelize(ps, false))
+      .filter((s: string) => s && s !== '');
     const path = data.path.split('/').filter((s: string) => s && s !== '');
     const paramsRegex = /:(([a-z]|[A-Z]|[0-9]|[-])+)(?:\(.*?\))?$/;
 
     const pathStr = path.join('/');
 
-    const params: {[key: string]: string} = {};
-    for (let idx=0; idx<path.length; idx += 1) {
+    const params: { [key: string]: string } = {};
+    for (let idx = 0; idx < path.length; idx += 1) {
       const pathParamMatches = pathSpec[idx].match(paramsRegex);
       if (pathParamMatches && pathParamMatches[1]) {
         params[pathParamMatches[1]] = path[idx];
       }
-    }
-
-    if (path.length > 0 && !this._store.get(`${schemaName}`)) {
-      this._logger.debug(`__parsePayload: No data service for ${schemaName}`);
-      return; // We don't have a data service for this data
     }
 
     const pathParts: PathParts = {
@@ -242,10 +221,10 @@ export default class ButtressDataRealtime {
 
   private _handlePut(schemaName: string, pathParts: PathParts, response: any) {
     this._logger.debug(`_handlePut: start`);
-    const responses: Array<any> = (Array.isArray(response)) ? response : [response];
+    const responses: Array<any> = Array.isArray(response) ? response : [response];
 
     for (let x = 0; x < responses.length; x += 1) {
-      const isBulk = (responses[x].id && responses[x].results);
+      const isBulk = responses[x].id && responses[x].results;
 
       if (isBulk) {
         responses[x].results.forEach((res: any) => this._update(schemaName, pathParts, responses[x].id, res));
@@ -255,11 +234,18 @@ export default class ButtressDataRealtime {
     }
   }
 
-  private _handleDelete(schemaName: string, pathParts: PathParts, response:any, isBulk: boolean = false, clear: boolean = false) {
+  private _handleDelete(
+    schemaName: string,
+    pathParts: PathParts,
+    response: any,
+    isBulk: boolean = false,
+    clear: boolean = false,
+  ) {
     this._logger.debug(`_handleDelete: start`);
-    const responses: Array<any> = (Array.isArray(response)) ? response : [response];
+    const responses: Array<any> = Array.isArray(response) ? response : [response];
 
-    if (clear || (!isBulk && !pathParts.id)) { // DeleteAll
+    if (clear || (!isBulk && !pathParts.id)) {
+      // DeleteAll
       this._logger.warn(`Clearing store data hasn't been implemented yet`);
     } else if (isBulk) {
       // TODO: Need to get list of the ids that have been deleted from buttress
@@ -267,70 +253,83 @@ export default class ButtressDataRealtime {
         const entity = this._store.get(`${schemaName}.${responses[x].id}`);
         if (entity) {
           this._store.delete(schemaName, responses[x].id, {
-            localOnly: true
+            localOnly: true,
           });
         }
-      };
-    } else if (pathParts.id) { // DeleteSingle
+      }
+    } else if (pathParts.id) {
+      // DeleteSingle
       const entity = this._store.get(`${schemaName}.${pathParts.id}`);
       if (entity) {
         this._store.delete(schemaName, pathParts.id, {
-          localOnly: true
+          localOnly: true,
         });
       }
     }
 
     this._logger.debug(`_handleDelete: end`);
   }
-  
+
   private _handlePost(schemaName: string, response: any) {
-    const responses: Array<any> = (Array.isArray(response)) ? response : [response];
+    const responses: Array<any> = Array.isArray(response) ? response : [response];
     this._logger.debug(`_handlePost: start`, responses);
 
     for (let x = 0; x < responses.length; x += 1) {
-      const entity = this._store.get(`${schemaName}.${responses[x].id}`);
-      if (entity) return; // Skip as it already exists
-
-      this._store.set(`${schemaName}.${responses[x].id}`, response, {
-        localOnly: true
+      const existing = this._store.get(`${schemaName}.${responses[x].id}`);
+      if (existing) {
+        this._store.set(
+          `${schemaName}.${responses[x].id}`,
+          { ...existing, ...responses[x] },
+          {
+            localOnly: true,
+          },
+        );
+        continue;
+      }
+      // Through create() so the data service knows its cached pages may be missing it.
+      this._store.create(schemaName, responses[x], {
+        localOnly: true,
       });
     }
   }
 
-  private async _update(schemaName: string, pathParts: PathParts, id: string, response:any) {
+  private async _update(schemaName: string, pathParts: PathParts, id: string, response: any) {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (updatePath === false) {
+      const detail: EventDataDataServiceLoadById = { schemaName, id };
       this._dispatchCustomEvent('dataservice:loadById', {
-        detail: {
-          schemaName,
-          id,
-        } as EventDataDataServiceLoadById,
+        detail,
         bubbles: true,
-        composed: true
+        composed: true,
       });
+      this._loadById(detail);
       return;
     }
 
     if (response.type === 'scalar') {
       this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, response.value, {
-        localOnly: true
+        localOnly: true,
       });
     } else if (response.type === 'scalar-increment') {
       this._logger.debug('updating', updatePath, response.value);
       this._store.set(updatePath, this._store.get(updatePath) + response.value, {
-        localOnly: true
+        localOnly: true,
       });
     } else if (response.type === 'vector-add') {
       this._logger.debug('inserting', updatePath, response.value);
-      this._store.pushExt(updatePath, {
-        localOnly: true,
-      }, response.value);
+      this._store.pushExt(
+        updatePath,
+        {
+          localOnly: true,
+        },
+        response.value,
+      );
     } else if (response.type === 'vector-rm') {
       this._logger.debug('removing', updatePath, response.value);
       this._store.spliceExt(updatePath, response.value.index, response.value.numRemoved, {
-        localOnly: true
+        localOnly: true,
       });
     }
   }
@@ -345,7 +344,7 @@ export default class ButtressDataRealtime {
     let tail: string[] = [];
     if (path) {
       tail = path.split('.');
- 
+
       if (tail.indexOf('__increment__') !== -1) {
         tail.splice(tail.indexOf('__increment__'), 1);
       }
@@ -353,5 +352,4 @@ export default class ButtressDataRealtime {
 
     return [collectionName, id].concat(tail).join('.');
   }
-
 }
