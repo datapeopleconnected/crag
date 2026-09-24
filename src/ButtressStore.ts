@@ -16,83 +16,82 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { Logger, LogLevel } from './Logger.js';
-import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
+import { ButtressSchema, ButtressSchemaHelpers } from './ButtressSchema.js';
 
 export interface ButtressStoreInterface {
-  get: Function,
-  set: Function,
-  create: Function,
-  delete: Function,
-  push: Function,
-  pushExt: Function,
-  splice: Function,
-  spliceExt:Function,
-  notifyPath: Function
+  get: Function;
+  set: Function;
+  create: Function;
+  delete: Function;
+  push: Function;
+  pushExt: Function;
+  splice: Function;
+  spliceExt: Function;
+  notifyPath: Function;
 }
 
 export interface ButtressEntity {
   [index: string]: any;
-  id: string
+  id: string;
 }
 
 interface PathSig {
-  name: string,
-  value: string | number,
-  literal: boolean,
-  structured: boolean,
-  rootProperty: string,
-  wildcard: boolean,
+  name: string;
+  value: string | number;
+  literal: boolean;
+  structured: boolean;
+  rootProperty: string;
+  wildcard: boolean;
 }
 
 export interface NotifyChangeOpts {
-  localOnly?: boolean,
-  forceChanged?: boolean,
-  silent?: boolean,
-  splice?: boolean,
+  localOnly?: boolean;
+  forceChanged?: boolean;
+  silent?: boolean;
+  splice?: boolean;
   dboComplete?: {
-    resolve: Function,
-    reject: Function,
-  },
+    resolve: Function;
+    reject: Function;
+  };
 }
 
 export interface IndexSplice {
-  addedCount: number
-  index: number
-  object: any[]
-  removed: any[]
-  opts?: NotifyChangeOpts
-  type: string
+  addedCount: number;
+  index: number;
+  object: any[];
+  removed: any[];
+  opts?: NotifyChangeOpts;
+  type: string;
 }
 interface MapAny {
-  [key: string]: any
+  [key: string]: any;
 }
 
 interface Subscription {
-  ref: string,
-  trigger: PathSig,
+  ref: string;
+  trigger: PathSig;
   info: {
-    lastRun: number,
-    args: Array<PathSig>
-  },
-  cb: Function
+    lastRun: number;
+    args: Array<PathSig>;
+  };
+  cb: Function;
 }
 interface Subscriptions {
-  [key: string]: Array<Subscription>
+  [key: string]: Array<Subscription>;
 }
 
 export type CRCallback = (...args: any[]) => void;
 
 export interface CR {
-  path?: string,
-  value: any,
-  base?: Map<string, ButtressEntity>,
-  opts: NotifyChangeOpts
+  path?: string;
+  value: any;
+  base?: Map<string, ButtressEntity>;
+  opts: NotifyChangeOpts;
 }
 
 let dedupeId = 0;
 
 export class ButtressStore implements ButtressStoreInterface {
-
   private __logger: Logger;
 
   // private __data: {[key: string]: ButtressEntity} = {};
@@ -102,7 +101,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
   private __dataPending: MapAny | null = null;
 
-  private __dataOld: MapAny | null = null
+  private __dataOld: MapAny | null = null;
 
   private __subscriptions: Subscriptions = {};
 
@@ -128,18 +127,26 @@ export class ButtressStore implements ButtressStoreInterface {
     if (!id) throw new Error('Unable to remove property');
 
     const parent = this.get(prePath);
-    const isMap = (parent instanceof Map);
-    const prop = (isMap) ? parent.get(id) : parent[id];
+    const isMap = parent instanceof Map;
+    const prop = isMap ? parent.get(id) : parent[id];
 
-    this.notifyPath(`${path}.splices`, { indexSplices: [{
-      index: 0,
-      addedCount: 0,
-      removed: [prop],
-      object: parent,
-      type: 'splice',
-    }] }, opts);
+    this.notifyPath(
+      `${path}.splices`,
+      {
+        indexSplices: [
+          {
+            index: 0,
+            addedCount: 0,
+            removed: [prop],
+            object: parent,
+            type: 'splice',
+          },
+        ],
+      },
+      opts,
+    );
 
-    const change = (isMap) ? parent.delete(id) : delete parent[id];
+    const change = isMap ? parent.delete(id) : delete parent[id];
     if (change) this.__invalidateData();
 
     return change;
@@ -153,16 +160,16 @@ export class ButtressStore implements ButtressStoreInterface {
     const parts = path.toString().split('.');
     let prop: any = root;
 
-    for (let i=0; i < parts.length; i += 1) {
+    for (let i = 0; i < parts.length; i += 1) {
       if (!prop) return undefined;
       const part = parts[i];
-      prop = (prop instanceof Map) ? prop.get(part) : prop[part];
+      prop = prop instanceof Map ? prop.get(part) : prop[part];
     }
 
     return prop;
   }
 
-  set(path: string, value: any, opts?: NotifyChangeOpts): string|undefined {
+  set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
     const change = opts?.silent || this.notifyPath(path, value, opts);
     const setPath = this.__setDataProperty(path, value);
     if (change) {
@@ -191,7 +198,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
       this.set(path, [], {
         localOnly: true,
-        silent: true
+        silent: true,
       });
       array = this.get(path);
     }
@@ -201,14 +208,16 @@ export class ButtressStore implements ButtressStoreInterface {
 
     // if (!opts?.localOnly && items.length) {
     if (items.length) {
-      this.__notifySplices(array, path, [{
-        index: len,
-        addedCount: items.length,
-        removed: [],
-        object: array,
-        type: 'splice',
-        opts
-      }]);
+      this.__notifySplices(array, path, [
+        {
+          index: len,
+          addedCount: items.length,
+          removed: [],
+          object: array,
+          type: 'splice',
+          opts,
+        },
+      ]);
     }
 
     return ret;
@@ -218,7 +227,14 @@ export class ButtressStore implements ButtressStoreInterface {
     return this.spliceExt(path, schema, start, deleteCount, undefined, ...items);
   }
 
-  spliceExt(path: string, schema: ButtressSchema, start: number, deleteCount?: number, opts?: NotifyChangeOpts, ...items: any[]): any[] {
+  spliceExt(
+    path: string,
+    schema: ButtressSchema,
+    start: number,
+    deleteCount?: number,
+    opts?: NotifyChangeOpts,
+    ...items: any[]
+  ): any[] {
     let array = this.get(path);
 
     const parts = path.split('.');
@@ -230,7 +246,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
       this.set(path, [], {
         localOnly: true,
-        silent: true
+        silent: true,
       });
       array = this.get(path);
     }
@@ -243,36 +259,38 @@ export class ButtressStore implements ButtressStoreInterface {
       beginning = Math.floor(beginning);
     }
 
-    const ret = (arguments.length === 3) ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
+    const ret = arguments.length === 3 ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
     if (items.length || ret.length) {
-      this.__notifySplices(array, path, [{
-        index: beginning,
-        addedCount: items.length,
-        removed: ret,
-        object: array,
-        type: 'splice',
-        opts
-      }]);
+      this.__notifySplices(array, path, [
+        {
+          index: beginning,
+          addedCount: items.length,
+          removed: ret,
+          object: array,
+          type: 'splice',
+          opts,
+        },
+      ]);
     }
 
     return ret;
   }
 
   private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {
-    this.notifyPath(`${path}.splices`, { indexSplices: splices }, {splice: true});
+    this.notifyPath(`${path}.splices`, { indexSplices: splices }, { splice: true });
     this.notifyPath(`${path}.length`, array.length);
     this.__invalidateData();
   }
 
-  private __setDataProperty(path: string, value: any): string|undefined {
+  private __setDataProperty(path: string, value: any): string | undefined {
     const parts = path.toString().split('.');
     let prop: any = this.__data;
 
-    const last = parts[parts.length-1];
+    const last = parts[parts.length - 1];
     if (parts.length > 1) {
       for (let i = 0; i < parts.length - 1; i += 1) {
         const part = parts[i];
-        prop = (prop instanceof Map) ? prop.get(part) : prop[part];
+        prop = prop instanceof Map ? prop.get(part) : prop[part];
         if (!prop) return undefined;
       }
       // Set value to object at end of path
@@ -308,7 +326,7 @@ export class ButtressStore implements ButtressStoreInterface {
       return true;
     }
 
-    const val = (arguments.length === 1) ? old : value;
+    const val = arguments.length === 1 ? old : value;
     const changed = old !== val;
 
     if (changed) {
@@ -328,12 +346,12 @@ export class ButtressStore implements ButtressStoreInterface {
 
         this.__dataPending[path].push({
           value,
-          opts
+          opts,
         });
       } else {
         this.__dataPending[path] = {
           value,
-          opts
+          opts,
         };
       }
     }
@@ -370,9 +388,9 @@ export class ButtressStore implements ButtressStoreInterface {
 
     this.__logger.debug(`__propertiesChanged changedProps: `, changedProps);
 
-    const id = dedupeId += 1;
+    const id = (dedupeId += 1);
     for (const prop of Object.keys(changedProps)) {
-      const rootProperty = (prop.indexOf('.') === -1) ? prop : prop.slice(0, prop.indexOf('.'));
+      const rootProperty = prop.indexOf('.') === -1 ? prop : prop.slice(0, prop.indexOf('.'));
       const fxs = this.__subscriptions[rootProperty];
       this.__logger.debug(`__propertiesChanged changed prop: ${prop}, got ${fxs?.length} fxs`);
       if (fxs) {
@@ -381,7 +399,9 @@ export class ButtressStore implements ButtressStoreInterface {
 
           const trigger = this.__pathMatchesTrigger(prop, fx.trigger);
 
-          this.__logger.debug(`__propertiesChanged fx: ${i}: lastRun: ${id} !== ${fx.info.lastRun}, trigger: ${trigger}`);
+          this.__logger.debug(
+            `__propertiesChanged fx: ${i}: lastRun: ${id} !== ${fx.info.lastRun}, trigger: ${trigger}`,
+          );
           // if (fx.info.lastRun !== id && trigger) {
           if (trigger) {
             fx.info.lastRun = id;
@@ -405,28 +425,28 @@ export class ButtressStore implements ButtressStoreInterface {
     const values: CR[] = [];
 
     for (let i = 0, l = args.length; i < l; i += 1) {
-      const {name, structured, wildcard, argVal, literal} = args[i];
+      const { name, structured, wildcard, argVal, literal } = args[i];
       let value = argVal;
       if (!literal) {
         if (wildcard) {
           const matches = path.indexOf(`${name}.`) === 0;
           const p = matches ? path : name;
-          const pathValue = (this.get(p) === undefined) ? changedProp.value : this.get(p);
+          const pathValue = this.get(p) === undefined ? changedProp.value : this.get(p);
           value = {
             path: matches ? path : name,
             value: pathValue,
             base: matches ? this.get(name) : pathValue,
-            opts: changedProp.opts
+            opts: changedProp.opts,
           };
         } else if (structured) {
           value = {
-            value: (this.get(name) === undefined) ? changedProp.value : this.get(name),
-            opts: changedProp.opts
+            value: this.get(name) === undefined ? changedProp.value : this.get(name),
+            opts: changedProp.opts,
           };
         } else {
           value = {
             value: this.get(name),
-            opts: changedProp.opts
+            opts: changedProp.opts,
           };
         }
       }
@@ -437,15 +457,20 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   private __pathMatchesTrigger(path: string, trigger: PathSig): boolean {
-    return (!trigger) || (trigger.name === path) ||
+    return (
+      !trigger ||
+      trigger.name === path ||
       !!(trigger.structured && trigger.name.indexOf(`${path}.`) === 0) ||
-      !!(trigger.wildcard && path.indexOf(`${trigger.name}.`) === 0);
+      !!(trigger.wildcard && path.indexOf(`${trigger.name}.`) === 0)
+    );
   }
 
   subscribe(pathsStr: string, fn: CRCallback): string {
     const id = uuidv4();
     this.__logger.debug('subscribe', pathsStr);
-    const paths = pathsStr.trim().split(',')
+    const paths = pathsStr
+      .trim()
+      .split(',')
       .map((path) => this.__parsePath(path.trim()));
 
     for (let i = 0; i < paths.length; i += 1) {
@@ -494,11 +519,11 @@ export class ButtressStore implements ButtressStoreInterface {
 
     // detect literal value (must be String or Number)
     let fc = path[0];
-    if (fc === '-') [,fc] = path;
+    if (fc === '-') [, fc] = path;
 
     if (fc >= '0' && fc <= '9') fc = '#';
 
-    if (fc === '\'' || fc === '"') {
+    if (fc === "'" || fc === '"') {
       p.value = path.slice(1, -1);
       p.literal = true;
     } else if (fc === '#') {
@@ -508,11 +533,11 @@ export class ButtressStore implements ButtressStoreInterface {
 
     // if not literal, look for structured path
     if (!p.literal) {
-      p.rootProperty = (path.indexOf('.') === -1) ? path : path.slice(0, path.indexOf('.'));
+      p.rootProperty = path.indexOf('.') === -1 ? path : path.slice(0, path.indexOf('.'));
       // detect structured path (has dots)
       p.structured = path.indexOf('.') >= 0;
       if (p.structured) {
-        p.wildcard = (path.slice(-2) === '.*');
+        p.wildcard = path.slice(-2) === '.*';
         if (p.wildcard) {
           p.name = path.slice(0, -2);
         }

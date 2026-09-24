@@ -14,16 +14,16 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import ButtressStore from './ButtressStore.js'
+import ButtressStore from './ButtressStore.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import type { ButtressSchemaProperties } from './types/ButtressSchemaProperties.js';
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
 export type ButtressSchema = {
-  name: string,
-  type: string,
-  core?: boolean,
-  properties: ButtressSchemaProperties,
+  name: string;
+  type: string;
+  core?: boolean;
+  properties: ButtressSchemaProperties;
 };
 export default ButtressSchema;
 
@@ -31,7 +31,7 @@ export class ButtressSchemaHelpers {
   static getSubSchema(schema: ButtressSchema, path: string): ButtressSchema | null {
     return path.split('.').reduce((out: ButtressSchema | null, part: string) => {
       if (!out) return null;
-      
+
       const property = ButtressStore.get(part, out.properties);
       if (!property) {
         return null;
@@ -42,17 +42,17 @@ export class ButtressSchemaHelpers {
 
       return {
         name: path,
-        properties: property.__schema || property
+        properties: property.__schema || property,
       } as ButtressSchema;
     }, schema);
   }
-  
+
   static getFlattened(schema: ButtressSchema): ButtressSchemaProperties {
     const __buildFlattenedSchema = (
       property: string,
       parent: ButtressSchemaProperties | ButtressSchemaProperty,
       path: string[],
-      flattened: ButtressSchemaProperties
+      flattened: ButtressSchemaProperties,
     ) => {
       type parentKey = keyof typeof parent;
 
@@ -68,7 +68,7 @@ export class ButtressSchemaHelpers {
         isRoot = false;
         flat = Object.assign(flat, __buildFlattenedSchema(childProp, parent[property as parentKey], path, flat));
       });
-  
+
       if (isRoot === true) {
         flat[path.join('.')] = parent[property as parentKey];
       }
@@ -82,16 +82,16 @@ export class ButtressSchemaHelpers {
     Object.keys(schema.properties).forEach((prop: string) => {
       flattened = Object.assign(flattened, __buildFlattenedSchema(prop, schema.properties, path, flattened));
     });
-  
+
     return flattened;
   }
 
   static inflate(schema: ButtressSchema, createId: boolean) {
-    const __inflateObject = (parent: {[index: string]: {}}, path: string[], value: any): {[index: string]: {}} => {
+    const __inflateObject = (parent: { [index: string]: {} }, path: string[], value: any): { [index: string]: {} } => {
       const parentOut = parent;
       if (path.length > 1) {
         const parentKey = path.shift();
-        if (!parentKey) return parentOut
+        if (!parentKey) return parentOut;
 
         if (!parentOut[parentKey]) {
           parentOut[parentKey] = {};
@@ -110,21 +110,21 @@ export class ButtressSchemaHelpers {
 
     const flattenedSchema = ButtressSchemaHelpers.getFlattened(schema);
     // type flattenedSchemaKey = keyof typeof flattenedSchema;
-  
-    const res: {[index: string]: any} = {};
-    const objects: {[index: string]: {}} = {};
+
+    const res: { [index: string]: any } = {};
+    const objects: { [index: string]: {} } = {};
     Object.keys(flattenedSchema).forEach((property) => {
       const config = flattenedSchema[property];
       const propVal = {
         path: property,
-        value: ButtressSchemaFactory.getPropDefault(config)
+        value: ButtressSchemaFactory.getPropDefault(config),
       };
-  
+
       const path = propVal.path.split('.');
       const root = path.shift();
       if (!root) return;
 
-      let {value} = propVal;
+      let { value } = propVal;
       if (path.length > 0) {
         if (!objects[root]) {
           objects[root] = {};
@@ -132,14 +132,14 @@ export class ButtressSchemaHelpers {
         __inflateObject(objects[root], path, value);
         value = objects[root];
       }
-  
+
       res[root] = value;
     });
 
     if (!res.id && createId) {
       res.id = ButtressSchemaFactory.getPropDefault({
         __type: 'id',
-        __default: 'new'
+        __default: 'new',
       });
     }
 
@@ -156,7 +156,7 @@ export class ButtressSchemaHelpers {
       const schemaProp = flatSchema[flatSchemaProperty];
 
       if (schemaProp.__type === 'boolean') {
-        val = (/^true$/i).test(value);
+        val = /^true$/i.test(value);
       } else if (schemaProp.__type === 'number') {
         val = value.replace(/[^\d.\- ]/g, '');
       }
@@ -169,7 +169,7 @@ export class ButtressSchemaHelpers {
     const parts = path.toString().split('.');
     let props: any = schema.properties;
 
-    for (let i=0; i < parts.length; i += 1) {
+    for (let i = 0; i < parts.length; i += 1) {
       if (!props) return undefined;
       const part = parts[i];
 

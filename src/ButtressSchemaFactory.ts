@@ -14,9 +14,9 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import {ObjectId} from 'bson';
+import { ObjectId } from 'bson';
 
-import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
+import { ButtressSchema, ButtressSchemaHelpers } from './ButtressSchema.js';
 
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
@@ -28,7 +28,7 @@ export class ButtressSchemaFactory {
     if (!schema) throw new Error(`Missing primarySchema when attempting to create blank object`);
 
     if (path.split('.').length > 1) {
-      const parts = path.split('.')
+      const parts = path.split('.');
       const subSchema = ButtressSchemaHelpers.getSubSchema(primarySchema, parts.slice(1, parts.length).join('.'));
       if (!subSchema) throw new Error(`Unable to find schema at path ${path}`);
       schema = subSchema;
@@ -44,7 +44,7 @@ export class ButtressSchemaFactory {
   static getPropDefault(config: ButtressSchemaProperty): null | string | [] | {} {
     let res;
     // 🤨
-    switch ((config.__type as unknown as string)) {
+    switch (config.__type as unknown as string) {
       case 'boolean':
         res = config.__default !== undefined ? config.__default : false;
         break;
@@ -67,7 +67,7 @@ export class ButtressSchemaFactory {
           res = config.__default;
         } else {
           res = null;
-        }  
+        }
         break;
       case 'date':
         if (config.__default === null) {

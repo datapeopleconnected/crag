@@ -33,17 +33,21 @@ describe('ButtressDbService', () => {
   console.log('TEST_USER2_TOKEN', TEST_USER2_TOKEN);
 
   it('should be isDbConnected is false by default', async () => {
-    const el: ButtressDbService = await fixture(html`<buttress-db-service></buttress-db-service>`);
+    const el: ButtressDbService = await fixture(html`
+      <buttress-db-service></buttress-db-service>
+    `);
 
     expect(el.isDbConnected()).to.equal(false);
   });
 
   it('should connect to a db instance', async () => {
-    db = await fixture(html`<buttress-db-service
-      endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-      token="${TEST_APP_TOKEN}"
-      api-path="test"
-    ></buttress-db-service>`);
+    db = await fixture(html`
+      <buttress-db-service
+        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+        token="${TEST_APP_TOKEN}"
+        api-path="test"
+      ></buttress-db-service>
+    `);
 
     await db.connect();
 
@@ -92,12 +96,14 @@ describe('ButtressDbService', () => {
   });
 
   describe('Policy', () => {
-    it ('should connect and have access to all the records but no number property', async () => {
-      const db1: ButtressDbService = await fixture(html`<buttress-db-service
-        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-        token="${TEST_USER1_TOKEN}"
-        api-path="test"
-      ></buttress-db-service>`);
+    it('should connect and have access to all the records but no number property', async () => {
+      const db1: ButtressDbService = await fixture(html`
+        <buttress-db-service
+          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+          token="${TEST_USER1_TOKEN}"
+          api-path="test"
+        ></buttress-db-service>
+      `);
 
       await db1.connect();
 
@@ -108,12 +114,14 @@ describe('ButtressDbService', () => {
       expect(queryCall.results).to.be.an('array');
     });
 
-    it ('should connect and have access to all the records but no status property', async () => {
-      const db2: ButtressDbService = await fixture(html`<buttress-db-service
-        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-        token="${TEST_USER2_TOKEN}"
-        api-path="test"
-      ></buttress-db-service>`);
+    it('should connect and have access to all the records but no status property', async () => {
+      const db2: ButtressDbService = await fixture(html`
+        <buttress-db-service
+          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
+          token="${TEST_USER2_TOKEN}"
+          api-path="test"
+        ></buttress-db-service>
+      `);
 
       await db2.connect();
 
