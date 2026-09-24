@@ -101,6 +101,10 @@ export default class ButtressDataRealtime {
     }
   }
 
+  get isOpen(): boolean {
+    return Boolean(this._socket);
+  }
+
   disconnect() {
     if (!this._socket) return;
 

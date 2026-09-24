@@ -75,8 +75,8 @@ customElements.define('organisation-list', OrganisationList);
 ## How it works
 
 - `connect()` fetches your app's schemas and creates a data service for each one, then opens the realtime socket.
-  `awaitConnection()` resolves once the schemas have loaded. Calling `connect()` again replaces the socket, and
-  removing the element closes it.
+  `awaitConnection()` resolves once the schemas have loaded. Calling `connect()` again replaces the socket.
+  Removing the element closes the socket, and adding it back (or moving it) opens it again.
 - Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
   loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
 - Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a
@@ -123,9 +123,10 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
 | `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |
 
-The connection settings are copied when the element connects and whenever they change. A change made after `connect()`
-applies to later requests but doesn't reconnect the realtime socket. The logging attributes are read when the element
-connects.
+The connection settings are copied when the element connects and whenever they change. When the element connects, an
+unset attribute leaves its setting alone, so a value set with `setEndpoint()` or the other setters survives the element
+being moved. A change made after `connect()` applies to later requests but doesn't reconnect the realtime socket. The
+logging attributes are read when the element connects.
 
 ## API
 

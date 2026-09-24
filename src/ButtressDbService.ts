@@ -92,6 +92,9 @@ export class ButtressDbService extends LitElement {
 
   private _awaitConnectionPool: Array<Function> = [];
 
+  // Set when the element is removed with the realtime socket open, so moving it in the DOM reopens the socket.
+  private _reopenRealtime: boolean = false;
+
   private _dsStoreInterface: customButtressStoreInterface;
 
   constructor() {
@@ -141,16 +144,27 @@ export class ButtressDbService extends LitElement {
     super.connectedCallback();
     this._initLogger();
 
-    this._settings.endpoint = this.endpoint;
-    this._settings.token = this.token;
-    this._settings.apiPath = this.apiPath;
-    this._settings.userId = this.userId;
-    this._settings.coreSchema = this.coreSchema && this.coreSchema.length > 0 ? this.coreSchema : [];
+    // Unset properties keep what's already in the settings, so values from setEndpoint() etc. survive a move in the DOM.
+    this._settings.endpoint = this.endpoint ?? this._settings.endpoint;
+    this._settings.token = this.token ?? this._settings.token;
+    this._settings.apiPath = this.apiPath ?? this._settings.apiPath;
+    this._settings.userId = this.userId ?? this._settings.userId;
+    this._settings.coreSchema = this.coreSchema ?? this._settings.coreSchema ?? [];
+
+    if (this._reopenRealtime) {
+      this._reopenRealtime = false;
+      try {
+        this._realtime.connect();
+      } catch (err) {
+        this._logger.error(err);
+      }
+    }
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this._logger.debug(`disconnectedCallback`);
+    this._reopenRealtime = this._realtime.isOpen;
     this._realtime.disconnect();
   }
 
@@ -188,7 +202,11 @@ export class ButtressDbService extends LitElement {
     const wasInDocument = this.isConnected;
     await this._connect();
     // Removed while the schemas were loading: disconnectedCallback has already run, so nothing would close the socket.
-    if (wasInDocument && !this.isConnected) return;
+    // Open it when the element is added back instead.
+    if (wasInDocument && !this.isConnected) {
+      this._reopenRealtime = true;
+      return;
+    }
 
     await this._realtime.connect();
   }

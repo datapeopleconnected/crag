@@ -31,13 +31,16 @@ describe('ButtressRealtime', () => {
       () => {},
     );
 
+    expect(realtime.isOpen).to.equal(false);
     realtime.connect();
     const socket = (realtime as any)._socket;
     expect(socket.active).to.equal(true);
+    expect(realtime.isOpen).to.equal(true);
 
     realtime.disconnect();
 
     expect(socket.active).to.equal(false);
+    expect(realtime.isOpen).to.equal(false);
     expect((realtime as any)._socket).to.equal(null);
   });
 
