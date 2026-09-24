@@ -31,14 +31,39 @@ describe('ButtressRealtime', () => {
       () => {},
     );
 
+    expect(realtime.isOpen).to.equal(false);
     realtime.connect();
     const socket = (realtime as any)._socket;
     expect(socket.active).to.equal(true);
+    expect(realtime.isOpen).to.equal(true);
 
     realtime.disconnect();
 
     expect(socket.active).to.equal(false);
+    expect(realtime.isOpen).to.equal(false);
     expect((realtime as any)._socket).to.equal(null);
+  });
+
+  it('closes the previous socket when connect is called again', () => {
+    const settings = buildSettings({});
+    settings.endpoint = 'http://127.0.0.1:1';
+    settings.token = 'abc';
+    const realtime = new ButtressRealtime(
+      {} as any,
+      settings,
+      () => {},
+      () => {},
+    );
+
+    realtime.connect();
+    const first = (realtime as any)._socket;
+    realtime.connect();
+    const second = (realtime as any)._socket;
+
+    expect(first.active).to.equal(false);
+    expect(second.active).to.equal(true);
+
+    realtime.disconnect();
   });
 
   it('does nothing on disconnect before connect', () => {
@@ -50,5 +75,23 @@ describe('ButtressRealtime', () => {
     );
 
     expect(() => realtime.disconnect()).to.not.throw();
+  });
+
+  it('creates entities that are new to the store', () => {
+    const created: unknown[][] = [];
+    const store = {
+      get: () => undefined,
+      create: (...args: unknown[]) => created.push(args),
+    };
+    const realtime = new ButtressRealtime(
+      store as any,
+      buildSettings({}),
+      () => {},
+      () => {},
+    );
+
+    (realtime as any)._handlePost('organisation', { id: 'org1', name: 'New' });
+
+    expect(created).to.deep.equal([['organisation', { id: 'org1', name: 'New' }, { localOnly: true }]]);
   });
 });

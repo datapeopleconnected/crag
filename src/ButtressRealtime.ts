@@ -75,6 +75,9 @@ export default class ButtressDataRealtime {
       ? `${this._settings.endpoint}/${this._settings.apiPath}`
       : this._settings.endpoint;
 
+    // Calling connect() again replaces the socket rather than leaving the old one open.
+    this.disconnect();
+
     this._logger.debug(`Opening connection to ${uri}`);
 
     this._dispatchCustomEvent('bjs-connection-changed', {
@@ -96,6 +99,10 @@ export default class ButtressDataRealtime {
       this._onDisconnected();
       this._logger.error(err);
     }
+  }
+
+  get isOpen(): boolean {
+    return Boolean(this._socket);
   }
 
   disconnect() {
@@ -318,7 +325,8 @@ export default class ButtressDataRealtime {
         );
         continue;
       }
-      this._store.set(`${schemaName}.${responses[x].id}`, responses[x], {
+      // Through create() so the data service knows its cached pages may be missing it.
+      this._store.create(schemaName, responses[x], {
         localOnly: true,
       });
     }

@@ -9,6 +9,13 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   files: 'test/unit/**/*.test.ts',
 
   /**
+   * One test file at a time. Headless Chrome doesn't run requestAnimationFrame callbacks in a background tab
+   * (puppeteer#10350), and @web/test-runner-chrome 1.x no longer works around it by bringing each tab to the front.
+   * fixture() of an element that isn't a Lit element waits for a frame, so it hangs when files run side by side.
+   */
+  concurrency: 1,
+
+  /**
    * Used when run with --coverage (npm run test:coverage). The run fails if coverage drops below these
    * floors, which sit just under the current figures: raise them as coverage improves.
    */

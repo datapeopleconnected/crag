@@ -16,7 +16,7 @@
 
 export { ButtressDbService } from './ButtressDbService.js';
 export { buttressDbServiceContext } from './context.js';
-export { QueryResult } from './ButtressDataService.js';
-export { ButtressEntity, CRCallback, CR } from './ButtressStore.js';
-export { Settings } from './helpers.js';
+export type { QueryResult } from './ButtressDataService.js';
+export type { ButtressEntity, CRCallback, CR } from './ButtressStore.js';
+export type { Settings } from './helpers.js';
 export { LogLevel } from './Logger.js';

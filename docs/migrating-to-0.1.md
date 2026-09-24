@@ -251,6 +251,16 @@ realtime updates whose `data.clientSessionId` matches.
 - **Missing entities are fetched once.** When a realtime update arrives for an entity that isn't in the store, crag
   fetches it. Previously a handler for this was added every time the element connected and never removed, so after the
   element had been attached N times, each of these updates caused N fetches.
+- **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
+  request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
+  Buttress has responded to every request, including any queued while it waits.
+- **Paged queries return the page Buttress sent.** A query with `limit` or `skip` used to be run again over
+  everything in the store and then cut to size, so the page depended on what else was loaded: opening straight on
+  page 2 returned nothing. It now returns the entities Buttress sent for that page, less any since deleted or changed
+  so they no longer match. After a create in that schema, whether yours or another client's, pages are searched for
+again.
+- **Every create in a bulk add settles.** When several creates were combined into one bulk request, only the first
+  one's `dboComplete` was resolved or rejected. The others never settled.
 - **Invalid `loglevel` values are ignored.** Previously, a value from `0` to `4` was turned into a level name and that
   name used as the level, which quietly turned off everything except errors.
 

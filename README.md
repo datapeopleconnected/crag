@@ -20,6 +20,9 @@ Upgrading from 0.0.x? Follow the [migration guide](docs/migrating-to-0.1.md).
 npm install @buttress/crag
 ```
 
+The package includes a [Custom Elements Manifest](https://custom-elements-manifest.open-wc.org/)
+(`custom-elements.json`), so editors and documentation tools can describe the element's attributes, events and slot.
+
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
@@ -75,7 +78,8 @@ customElements.define('organisation-list', OrganisationList);
 ## How it works
 
 - `connect()` fetches your app's schemas and creates a data service for each one, then opens the realtime socket.
-  `awaitConnection()` resolves once the schemas have loaded.
+  `awaitConnection()` resolves once the schemas have loaded. Calling `connect()` again replaces the socket.
+  Removing the element closes the socket, and adding it back (or moving it) opens it again.
 - Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
   loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
 - Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a
@@ -122,9 +126,10 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
 | `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |
 
-The connection settings are copied when the element connects and whenever they change. A change made after `connect()`
-applies to later requests but doesn't reconnect the realtime socket. The logging attributes are read when the element
-connects.
+The connection settings are copied when the element connects and whenever they change. When the element connects, an
+unset attribute leaves its setting alone, so a value set with `setEndpoint()` or the other setters survives the element
+being moved. A change made after `connect()` applies to later requests but doesn't reconnect the realtime socket. The
+logging attributes are read when the element connects.
 
 ## API
 
@@ -159,7 +164,7 @@ any time.
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
 | `delete(path, opts?)`                         | Deletes an entity: `delete('organisation.<id>')`. Returns whether it was in the store.                                                             |
-| `nextIdle(schema)`                            | Resolves once that schema has no queued requests. It doesn't wait for a request that's already been sent; use `dboComplete` for that. |
+| `nextIdle(schema)`                            | Resolves once that schema has no requests queued or waiting for a response from Buttress. It also waits for requests queued in the meantime. |
 
 Before you write:
 
@@ -250,21 +255,33 @@ const activeOrLarge = await db.query(
 );
 ```
 
-`$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both, sort
-the results yourself.
+`query()` sends the query to Buttress and merges what comes back into the store, and asks Buttress for the total. How
+it then chooses `results` depends on whether you ask for a page, with `limit` or `skip`.
 
-`query()` sends the query to Buttress and merges what comes back into the store, asks Buttress for the total, then runs
-the same query against the store. As a result:
+**Without `limit` or `skip`,** crag runs the query against everything in the store. So:
 
-- `results` can include matching entities that are only in the store, such as ones you've just created;
+- `results` includes matching entities that are only in the store, such as ones you've just created, and leaves out
+  ones you've changed so they no longer match;
+- `$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both,
+  sort the results yourself.
+
+**With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
+When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
+longer match, so a page can come back shorter than `limit`. Once an entity has been created in that schema, by you or
+by another client, the next call for a page searches again, because only Buttress knows which page the new entity
+belongs on. A search sent in the same tick as a `create()` can reach Buttress before the new entity does. Entities
+Buttress has that crag hasn't heard about appear once you pass `bust: true`.
+
+Either way:
+
 - `total` is Buttress's count, so it can differ from `results.length`;
 - running the same query again, with the same `limit`, `skip`, `sort` and `project`, doesn't fetch the entities again
   unless you pass `bust: true`. The total is always requested.
 
 | Option        | Description                                                                        |
 | ------------- | ---------------------------------------------------------------------------------- |
-| `limit`       | Maximum number of results, applied by Buttress and to the local results.           |
-| `skip`        | Number of results to skip, applied the same way.                                   |
+| `limit`       | Maximum number of results, applied by Buttress.                                    |
+| `skip`        | Number of results to skip, applied by Buttress.                                    |
 | `sort`        | `{ path, direction: 'ASC' \| 'DESC', type? }`, where `type` is `STRING` (the default), `NUMBER` or `DATE`. |
 | `project`     | Projection, applied by Buttress.                                                   |
 | `bust`        | Fetches even if this exact query has already run.                                 |
@@ -337,14 +354,16 @@ npm run test:unit
 | `test/e2e/`             | End-to-end tests, run in Chrome against Buttress in Docker.     |
 | `scripts/`              | Starts and seeds Buttress for the end-to-end tests.             |
 | `.docker/`              | The Buttress stack the end-to-end tests run against.            |
-| `demo/`                 | The page `npm start` serves.                                    |
+| `demo/`                 | The page `npm start` serves: connects to a Buttress and lists one schema's entities. |
 | `docs/`                 | Guides, such as the [0.1 migration guide](docs/migrating-to-0.1.md). |
 | `dist/`                 | Build output. It's published along with `src/` and the licence. |
+| `custom-elements.json`  | The Custom Elements Manifest, generated by `npm run build` and published. |
 
 | Script                        | What it does                                                                   |
 | ----------------------------- | ------------------------------------------------------------------------------ |
 | `npm start`                   | Builds, watches, and serves `demo/`.                                           |
-| `npm run build`               | Compiles `src/` to `dist/`.                                                    |
+| `npm run build`               | Compiles `src/` to `dist/`, then runs `analyze`.                               |
+| `npm run analyze`             | Writes `custom-elements.json` from `src/`. See `custom-elements-manifest.config.mjs`. |
 | `npm run test:unit`           | Runs the unit tests in Chrome. No build or server needed.                      |
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
 | `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |

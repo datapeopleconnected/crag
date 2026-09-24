@@ -12,8 +12,8 @@ export default defineConfig([
       'test-results/**',
       'dist/**',
       '.test-bundle/**',
-      '.claude/**',
       'coverage/**',
+      '.claude/**',
     ],
   },
   // Also provides the browser and Mocha globals, and the import-x plugin whose rules are adjusted below.

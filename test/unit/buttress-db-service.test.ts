@@ -130,6 +130,50 @@ describe('ButtressDbService settings', () => {
   });
 });
 
+describe('ButtressDbService settings on connect', () => {
+  it('keeps values from the setters when moved to another parent', async () => {
+    const parent = await fixture<HTMLDivElement>(html`
+      <div>
+        <buttress-db-service></buttress-db-service>
+        <section></section>
+      </div>
+    `);
+    const el = parent.querySelector<ButtressDbService>('buttress-db-service')!;
+    el.setEndpoint('https://example.test');
+    el.setToken('abc');
+    el.setUserId('user-1');
+    el.setCoreSchemas(['app']);
+
+    parent.querySelector('section')!.appendChild(el);
+
+    expect(el.getEndpoint()).to.equal('https://example.test');
+    expect(el.getToken()).to.equal('abc');
+    expect(el.getUserId()).to.equal('user-1');
+    expect(el.getCoreSchemas()).to.deep.equal(['app']);
+  });
+
+  it('prefers attributes over earlier setter values when connected', async () => {
+    const parent = await fixture<HTMLDivElement>(html`
+      <div></div>
+    `);
+    const el = document.createElement('buttress-db-service') as ButtressDbService;
+    el.setEndpoint('https://old.test');
+    el.setAttribute('endpoint', 'https://new.test');
+
+    parent.appendChild(el);
+
+    expect(el.getEndpoint()).to.equal('https://new.test');
+  });
+
+  it('defaults the core schemas to an empty list', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+
+    expect(el.getCoreSchemas()).to.deep.equal([]);
+  });
+});
+
 describe('ButtressDbService realtime', () => {
   it('closes the realtime connection when removed', async () => {
     const el = await fixture<ButtressDbService>(html`
@@ -144,5 +188,102 @@ describe('ButtressDbService realtime', () => {
     el.remove();
 
     expect(disconnects).to.equal(1);
+  });
+
+  it('reopens the realtime connection when moved to another parent', async () => {
+    const parent = await fixture<HTMLDivElement>(html`
+      <div>
+        <buttress-db-service endpoint="http://127.0.0.1:1" token="abc"></buttress-db-service>
+        <section></section>
+      </div>
+    `);
+    const el = parent.querySelector<ButtressDbService>('buttress-db-service')!;
+    const realtime = (el as any)._realtime;
+    realtime.connect();
+    const before = realtime._socket;
+
+    parent.querySelector('section')!.appendChild(el);
+
+    expect(before.active).to.equal(false);
+    expect(realtime.isOpen).to.equal(true);
+    expect(realtime._socket.active).to.equal(true);
+
+    el.remove();
+    expect(realtime.isOpen).to.equal(false);
+  });
+
+  it('does not open a realtime connection on move if none was open', async () => {
+    const parent = await fixture<HTMLDivElement>(html`
+      <div>
+        <buttress-db-service endpoint="http://127.0.0.1:1" token="abc"></buttress-db-service>
+        <section></section>
+      </div>
+    `);
+    const el = parent.querySelector<ButtressDbService>('buttress-db-service')!;
+
+    parent.querySelector('section')!.appendChild(el);
+
+    expect((el as any)._realtime.isOpen).to.equal(false);
+  });
+});
+
+describe('ButtressDbService connect', () => {
+  let originalFetch: typeof window.fetch;
+  let resolveSchema: () => void;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    // Holds the schema request open until the test resolves it, with an empty schema list.
+    window.fetch = () =>
+      new Promise<Response>((resolve) => {
+        resolveSchema = () => resolve(new Response('[]', { status: 200 }));
+      });
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const connectWithStubbedRealtime = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+    `);
+    let realtimeConnects = 0;
+    (el as any)._realtime.connect = () => {
+      realtimeConnects += 1;
+    };
+    const connecting = el.connect();
+    return { el, connecting, realtimeConnects: () => realtimeConnects };
+  };
+
+  it('opens the realtime socket once the schemas have loaded', async () => {
+    const { connecting, realtimeConnects } = await connectWithStubbedRealtime();
+
+    resolveSchema();
+    await connecting;
+
+    expect(realtimeConnects()).to.equal(1);
+  });
+
+  it('does not open the realtime socket if removed while the schemas load', async () => {
+    const { el, connecting, realtimeConnects } = await connectWithStubbedRealtime();
+
+    el.remove();
+    resolveSchema();
+    await connecting;
+
+    expect(realtimeConnects()).to.equal(0);
+  });
+
+  it('opens the realtime socket when added back after being removed while the schemas load', async () => {
+    const { el, connecting, realtimeConnects } = await connectWithStubbedRealtime();
+    const parent = el.parentElement!;
+
+    el.remove();
+    resolveSchema();
+    await connecting;
+    parent.appendChild(el);
+
+    expect(realtimeConnects()).to.equal(1);
   });
 });

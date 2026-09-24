@@ -43,6 +43,22 @@ export interface EventDataDataServiceLoadById {
   id: string;
 }
 
+/**
+ * Connects the page to a Buttress server, keeps a local store of the entities you load, and provides itself to the
+ * elements inside it through `buttressDbServiceContext`.
+ *
+ * @tagname buttress-db-service
+ *
+ * @slot - Content that uses the service. The element takes up no space in the layout (`display: contents`).
+ *
+ * @attr log-label - Label for the element's own log lines. Defaults to the tag name.
+ * @attr log-disable - Turns off the element's own log lines. Errors are still printed.
+ *
+ * @fires {CustomEvent<boolean>} bjs-connection-changed - With `true` when `connect()` opens the realtime socket, then
+ * whenever the socket connects (`true`) or disconnects (`false`).
+ * @fires {CustomEvent<EventDataDataServiceLoadById>} dataservice:loadById - When a realtime update arrives for an
+ * entity that isn't in the store. The element fetches the entity itself; the event is for information.
+ */
 export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
 
@@ -64,13 +80,13 @@ export class ButtressDbService extends LitElement {
   @property({ type: String, attribute: 'api-path' })
   apiPath?: string;
 
-  @property({ type: String })
+  @property({ type: String, attribute: 'userid' })
   userId?: string;
 
   @property({ type: Array, attribute: 'core-schema' })
   coreSchema?: Array<string>;
 
-  @property({ type: String })
+  @property({ type: String, attribute: 'loglevel' })
   logLevel: string = 'info';
 
   private _logger: Logger = new Logger(this.tagName.toLowerCase());
@@ -91,6 +107,9 @@ export class ButtressDbService extends LitElement {
   private _connected: boolean = false;
 
   private _awaitConnectionPool: Array<Function> = [];
+
+  // Set when the element is removed with the realtime socket open, so moving it in the DOM reopens the socket.
+  private _reopenRealtime: boolean = false;
 
   private _dsStoreInterface: customButtressStoreInterface;
 
@@ -141,16 +160,27 @@ export class ButtressDbService extends LitElement {
     super.connectedCallback();
     this._initLogger();
 
-    this._settings.endpoint = this.endpoint;
-    this._settings.token = this.token;
-    this._settings.apiPath = this.apiPath;
-    this._settings.userId = this.userId;
-    this._settings.coreSchema = this.coreSchema && this.coreSchema.length > 0 ? this.coreSchema : [];
+    // Unset properties keep what's already in the settings, so values from setEndpoint() etc. survive a move in the DOM.
+    this._settings.endpoint = this.endpoint ?? this._settings.endpoint;
+    this._settings.token = this.token ?? this._settings.token;
+    this._settings.apiPath = this.apiPath ?? this._settings.apiPath;
+    this._settings.userId = this.userId ?? this._settings.userId;
+    this._settings.coreSchema = this.coreSchema ?? this._settings.coreSchema ?? [];
+
+    if (this._reopenRealtime) {
+      this._reopenRealtime = false;
+      try {
+        this._realtime.connect();
+      } catch (err) {
+        this._logger.error(err);
+      }
+    }
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this._logger.debug(`disconnectedCallback`);
+    this._reopenRealtime = this._realtime.isOpen;
     this._realtime.disconnect();
   }
 
@@ -185,7 +215,15 @@ export class ButtressDbService extends LitElement {
       throw new Error(`Missing required setting 'apiPath'`);
     }
 
+    const wasInDocument = this.isConnected;
     await this._connect();
+    // Removed while the schemas were loading: disconnectedCallback has already run, so nothing would close the socket.
+    // Open it when the element is added back instead.
+    if (wasInDocument && !this.isConnected) {
+      this._reopenRealtime = true;
+      return;
+    }
+
     await this._realtime.connect();
   }
 
