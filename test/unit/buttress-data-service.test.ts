@@ -371,3 +371,26 @@ describe('ButtressDataService query', () => {
     expect(names(results)).to.deep.equal(['A00', ...range(1, 25).filter((n) => n !== 'A03')]);
   });
 });
+
+describe('ButtressDataService $exists', () => {
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const data = [
+    { id: 'set', name: 'Set', tags: ['a'] },
+    { id: 'null', name: null, tags: [] },
+    { id: 'falsy', name: '', tags: [] },
+    { id: 'missing' },
+  ];
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  it('matches entities that have the property, whatever its value', () => {
+    expect(ids({ name: { $exists: true } })).to.deep.equal(['set', 'null', 'falsy']);
+  });
+
+  it('matches entities that do not have the property', () => {
+    expect(ids({ name: { $exists: false } })).to.deep.equal(['missing']);
+  });
+
+  it('counts an empty array as present', () => {
+    expect(ids({ tags: { $exists: true } })).to.deep.equal(['set', 'null', 'falsy']);
+  });
+});

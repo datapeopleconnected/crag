@@ -327,47 +327,12 @@ describe('processQueryPart', () => {
   });
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $exists', () => {
-    const query = {
-      'publicLedger.signatureRequirement.signatories.person.identifiers.name': {
-        $exists: 'John',
-      },
-    };
+    const path = 'publicLedger.signatureRequirement.signatories.person.identifiers';
 
-    const res = ds._processQueryPart(query, data);
-    expect(res).to.be.an('array');
-    expect(res.length).to.equal(1);
-
-    const values = res.reduce((arr: string[], i) => {
-      const signatories = i.publicLedger.signatureRequirement.signatories.map((s: any) => s.person);
-      const identifiers = signatories.map((s: any) => s.identifiers).flat();
-      const names = identifiers.map((i: any) => i.name);
-      arr = arr.concat(names).filter((v, idx, arr) => arr.indexOf(v) === idx);
-      return arr;
-    }, []);
-
-    expect(values.some((v) => v === 'John')).to.be.true;
-  });
-
-  it('Validate ButtressDataService _processQueryPart works with nested arrays in $exists', () => {
-    const query = {
-      'publicLedger.signatureRequirement.signatories.person.identifiers.name': {
-        $exists: 'John',
-      },
-    };
-
-    const res = ds._processQueryPart(query, data);
-    expect(res).to.be.an('array');
-    expect(res.length).to.equal(1);
-
-    const values = res.reduce((arr: string[], i) => {
-      const signatories = i.publicLedger.signatureRequirement.signatories.map((s: any) => s.person);
-      const identifiers = signatories.map((s: any) => s.identifiers).flat();
-      const names = identifiers.map((i: any) => i.name);
-      arr = arr.concat(names).filter((v, idx, arr) => arr.indexOf(v) === idx);
-      return arr;
-    }, []);
-
-    expect(values.some((v) => v === 'John')).to.be.true;
+    expect(ds._processQueryPart({ [`${path}.name`]: { $exists: true } }, data).length).to.equal(2);
+    expect(ds._processQueryPart({ [`${path}.name`]: { $exists: false } }, data).length).to.equal(0);
+    expect(ds._processQueryPart({ [`${path}.email`]: { $exists: true } }, data).length).to.equal(0);
+    expect(ds._processQueryPart({ [`${path}.email`]: { $exists: false } }, data).length).to.equal(2);
   });
 
   it('Validate ButtressDataService _processQueryPart works with nested arrays in $elMatch', () => {

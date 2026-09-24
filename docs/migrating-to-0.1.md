@@ -257,6 +257,9 @@ realtime updates whose `data.clientSessionId` matches.
   reload what you're showing. Entities already in the store keep their values until a query fetches them again.
 - **`awaitConnection()` rejects when `connect()` fails.** It used to wait until a later `connect()` succeeded, or
   forever if none did. It now rejects with the same error, so catch it where you await it.
+- **`$exists` matches on whether the property is there.** Locally it used to be the same test as `$eq`, so
+  `{ $exists: true }` only matched properties whose value was `true`. It now matches as Buttress does: `true` for a
+  property that's present, even if it's `null`, and `false` for one that's missing.
 - **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
   request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
   Buttress has responded to every request, including any queued while it waits.
