@@ -160,7 +160,7 @@ any time.
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. |
 | `create(schema, entity, opts?)`               | Adds the entity to the store and to Buttress, generating an `id` if it has none. Returns its path, e.g. `organisation.6709476b082b32233234259c`. |
-| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path.                                                                                        |
+| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
 | `delete(path, opts?)`                         | Deletes an entity: `delete('organisation.<id>')`. Returns whether it was in the store.                                                             |
@@ -179,9 +179,9 @@ Before you write:
 | Option                             | Effect                                                                                                    |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `localOnly`                        | Changes the store without sending anything to Buttress.                                                   |
-| `silent`                           | Doesn't notify subscribers. Sending to Buttress relies on the same notifications, so nothing is sent either. |
+| `silent`                           | Doesn't notify subscribers, and sends nothing to Buttress.                                                |
 | `forceChanged`                     | Notifies subscribers even if the value hasn't changed. Implies `localOnly`.                               |
-| `dboComplete: { resolve, reject }` | Called when the request to Buttress finishes, or straight away if nothing changed.                        |
+| `dboComplete: { resolve, reject }` | Called when the request to Buttress finishes, or straight away if nothing is sent.                        |
 
 To wait until a change has reached Buttress:
 

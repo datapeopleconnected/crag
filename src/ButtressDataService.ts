@@ -123,15 +123,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
       throw new Error('Unable to create entity with duplicate id');
     }
 
-    const path = this._store.create(this.name, value, opts);
+    const path = this._store.create(this.name, value, ButtressDataService.__storeOpts(opts));
     // Only Buttress can say which page a new entity belongs on.
     this.__pageGeneration += 1;
+    this.__send(opts, () => [this.__generateAddRequest(value)]);
 
     return path;
   }
 
   delete(id: string, opts?: NotifyChangeOpts) {
-    return this._store.delete(`${this.name}.${id}`, opts);
+    if (!this._store.get(`${this.name}.${id}`)) {
+      opts?.dboComplete?.resolve();
+      return false;
+    }
+
+    const deleted = this._store.delete(`${this.name}.${id}`, ButtressDataService.__storeOpts(opts));
+    this.__send(opts, () => [this.__generateRmRequest(id)]);
+
+    return deleted;
   }
 
   // Data accessors
@@ -140,7 +149,66 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
-    return this._store.set(path, value, opts);
+    const parts = path.split('.');
+    if (parts.length === 2) return this.__setEntity(parts[1], value, opts);
+
+    // Nothing to set inside an object that isn't in the store.
+    const parent = parts.length > 2 ? this._store.get(parts.slice(0, -1).join('.')) : undefined;
+    if (parts.length > 2 && (typeof parent !== 'object' || parent === null)) {
+      opts?.dboComplete?.resolve();
+      return undefined;
+    }
+
+    const changed = this._store.get(path) !== value;
+    const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
+    // A set of the whole collection is only ever local.
+    const entityPath = parts.slice(2).join('.');
+    this.__send(opts, () => (changed && entityPath ? [this.__generateUpdateRequest(parts[1], entityPath, value)] : []));
+
+    return setPath;
+  }
+
+  private __setEntity(id: string, value: any, opts?: NotifyChangeOpts): string | undefined {
+    if (value && typeof value === 'object') {
+      if (value.id === undefined || value.id === null || value.id === '') {
+        value.id = id;
+      } else if (value.id !== id) {
+        throw new Error(`The entity's id '${value.id}' doesn't match the id in the path, '${id}'`);
+      }
+    }
+
+    const existing = this._store.get(`${this.name}.${id}`);
+    const setPath = this._store.set(`${this.name}.${id}`, value, ButtressDataService.__storeOpts(opts));
+
+    if (!existing) {
+      this.__pageGeneration += 1;
+      this.__send(opts, () => [this.__generateAddRequest(value)]);
+      return setPath;
+    }
+
+    // Buttress updates an entity one path at a time, so send the top-level properties that changed.
+    const changed = Object.keys(value || {}).filter(
+      (key) => key !== 'id' && JSON.stringify(value[key]) !== JSON.stringify(existing[key]),
+    );
+    this.__send(opts, () => changed.map((key) => this.__generateUpdateRequest(id, key, value[key])));
+
+    return setPath;
+  }
+
+  // Queues a write's requests, unless its options keep it from Buttress, and settles dboComplete once they have.
+  private __send(opts: NotifyChangeOpts | undefined, requests: () => Promise<unknown>[]) {
+    const sent = opts?.localOnly || opts?.silent || opts?.forceChanged ? [] : requests();
+    Promise.all(sent).then(
+      () => opts?.dboComplete?.resolve(),
+      (err) => opts?.dboComplete?.reject(err),
+    );
+  }
+
+  // The data service settles dboComplete itself, so the store mustn't also resolve it.
+  private static __storeOpts(opts?: NotifyChangeOpts): NotifyChangeOpts | undefined {
+    if (!opts?.dboComplete) return opts;
+    const { dboComplete: _dboComplete, ...rest } = opts;
+    return rest;
   }
 
   push(path: string, ...items: any[]): number {
@@ -183,26 +251,55 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._logger.debug(cr);
 
     const path = cr.path.split('.');
-    if (/\.splices$/.test(cr.path) === true) {
-      if (path.length < 4) {
-        // Modification to base
-        cr.value.indexSplices.forEach((i: IndexSplice) => {
-          if (i.opts?.localOnly) {
-            this._logger.debug(`Ignoring localOnly change to base indexSplice: ${cr.path}`);
-            return;
+    // set, create and delete send their own requests. Only changes to arrays inside entities are sent from here.
+    if (!/\.splices$/.test(cr.path) || path.length < 4) return;
+
+    const entity = this._store.get(path.slice(0, 2).join('.'));
+
+    this._logger.debug(entity);
+
+    this._logger.debug('Child array mutation', cr);
+    this._logger.debug('Index Splices: ', cr.value.indexSplices?.length);
+    this._logger.debug('Key Splices: ', cr.value.keySplices?.length);
+
+    if (cr.value.indexSplices?.length > 0) {
+      cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
+        if (indexSplice.opts?.localOnly) {
+          this._logger.debug(`Ignoring localOnly change to indexSplice: ${cr.path}`);
+          return;
+        }
+
+        const o = indexSplice.object[indexSplice.index];
+        if (indexSplice.addedCount > 0) {
+          // Remove datastore entity prefix
+          path.splice(0, 2);
+          // Remove .splices
+          path.splice(-1, 1);
+          if (typeof o === 'object' && !o.id) {
+            o.id = ButtressSchemaFactory.getObjectId();
           }
 
-          if (i.addedCount > 0) {
-            this._logger.error(`Deprecated - Base array index addition, the base array is now a map`);
-            // const o = i.object[i.index];
-            // if (!o.id) o.id = new ObjectId().toString();
+          this.__generateUpdateRequest(entity.id, path.join('.'), o)
+            .then(() => {
+              if (cr.opts?.dboComplete) {
+                cr.opts.dboComplete.resolve();
+              }
+            })
+            .catch((err) => {
+              if (cr.opts?.dboComplete) {
+                cr.opts.dboComplete.reject(err);
+              }
+            });
+        } else if (indexSplice.removed.length > 0) {
+          if (indexSplice.removed.length > 1) {
+            this._logger.debug('Index splice removed.length > 1', indexSplice.removed);
+          } else {
+            path.splice(0, 2);
+            path.splice(-1, 1);
+            path.push(indexSplice.index);
+            path.push('__remove__');
 
-            // this.__generateAddRequest(o);
-          }
-
-          i.removed.forEach((r: any) => {
-            this._logger.debug(`this.__generateRmRequest(${r.id});`);
-            this.__generateRmRequest(r.id)
+            this.__generateUpdateRequest(entity.id, path.join('.'), '')
               .then(() => {
                 if (cr.opts?.dboComplete) {
                   cr.opts.dboComplete.resolve();
@@ -213,130 +310,26 @@ export default class ButtressDataService implements ButtressStoreInterface {
                   cr.opts.dboComplete.reject(err);
                 }
               });
-          });
-        });
-      } else {
-        const entity = this._store.get(path.slice(0, 2).join('.'));
-
-        this._logger.debug(entity);
-
-        this._logger.debug('Child array mutation', cr);
-        this._logger.debug('Index Splices: ', cr.value.indexSplices?.length);
-        this._logger.debug('Key Splices: ', cr.value.keySplices?.length);
-
-        if (cr.value.indexSplices?.length > 0) {
-          cr.value.indexSplices.forEach((indexSplice: IndexSplice) => {
-            if (indexSplice.opts?.localOnly) {
-              this._logger.debug(`Ignoring localOnly change to indexSplice: ${cr.path}`);
-              return;
-            }
-
-            const o = indexSplice.object[indexSplice.index];
-            if (indexSplice.addedCount > 0) {
-              // Remove datastore entity prefix
-              path.splice(0, 2);
-              // Remove .splices
-              path.splice(-1, 1);
-              if (typeof o === 'object' && !o.id) {
-                o.id = ButtressSchemaFactory.getObjectId();
-              }
-
-              this.__generateUpdateRequest(entity.id, path.join('.'), o)
-                .then(() => {
-                  if (cr.opts?.dboComplete) {
-                    cr.opts.dboComplete.resolve();
-                  }
-                })
-                .catch((err) => {
-                  if (cr.opts?.dboComplete) {
-                    cr.opts.dboComplete.reject(err);
-                  }
-                });
-            } else if (indexSplice.removed.length > 0) {
-              if (indexSplice.removed.length > 1) {
-                this._logger.debug('Index splice removed.length > 1', indexSplice.removed);
-              } else {
-                path.splice(0, 2);
-                path.splice(-1, 1);
-                path.push(indexSplice.index);
-                path.push('__remove__');
-
-                this.__generateUpdateRequest(entity.id, path.join('.'), '')
-                  .then(() => {
-                    if (cr.opts?.dboComplete) {
-                      cr.opts.dboComplete.resolve();
-                    }
-                  })
-                  .catch((err) => {
-                    if (cr.opts?.dboComplete) {
-                      cr.opts.dboComplete.reject(err);
-                    }
-                  });
-              }
-            }
-          });
-        } else if (cr.value.keySplices) {
-          this._logger.debug('Key Splices: ', cr.value.keySplices);
-          // cr.value.keySplices.forEach((k, idx) => {
-          //   k.removed.forEach(() => {
-          //     const itemIndex = cr.value.indexSplices[idx].index;
-          //     this._logger.debug(itemIndex);
-
-          //     path.splice(0, 2); // drop the prefix
-          //     path.splice(-1, 1); // drop the .splices
-          //     path.push(itemIndex); // add the correct index
-
-          //     // path.push(k.replace('#', ''));
-          //     path.push('__remove__'); // add the remove command
-          //     this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
-          //     // this.__generateUpdateRequest(entity.id, path.join('.'), '');
-          //   });
-          // });
+          }
         }
-      }
-    } else {
-      if (path.length < 2) {
-        // Path is a whole update to the collection so we'll ignore it
-        return;
-      }
+      });
+    } else if (cr.value.keySplices) {
+      this._logger.debug('Key Splices: ', cr.value.keySplices);
+      // cr.value.keySplices.forEach((k, idx) => {
+      //   k.removed.forEach(() => {
+      //     const itemIndex = cr.value.indexSplices[idx].index;
+      //     this._logger.debug(itemIndex);
 
-      const isAddition = path.length === 2;
+      //     path.splice(0, 2); // drop the prefix
+      //     path.splice(-1, 1); // drop the .splices
+      //     path.push(itemIndex); // add the correct index
 
-      const pathToEntity = path.splice(0, 2).join('.');
-      const item = this._store.get(pathToEntity);
-
-      // What if the entity doesn't exist?
-      if (!item) {
-        throw new Error("Unable to process data change, entity doesn't exist in local store.");
-      }
-
-      if (isAddition) {
-        // Addition to a base object
-        this.__generateAddRequest(item)
-          .then(() => {
-            if (cr?.opts?.dboComplete) {
-              cr.opts.dboComplete.resolve();
-            }
-          })
-          .catch((err) => {
-            if (cr?.opts?.dboComplete) {
-              cr.opts.dboComplete.reject(err);
-            }
-          });
-        return;
-      }
-
-      this.__generateUpdateRequest(item.id, path.join('.'), cr.value)
-        .then(() => {
-          if (cr?.opts?.dboComplete) {
-            cr.opts.dboComplete.resolve();
-          }
-        })
-        .catch((err) => {
-          if (cr?.opts?.dboComplete) {
-            cr.opts.dboComplete.reject(err);
-          }
-        });
+      //     // path.push(k.replace('#', ''));
+      //     path.push('__remove__'); // add the remove command
+      //     this._logger.debug(`this.__generateUpdateRequest(${entity.id}, ${path.join('.')}, '');`);
+      //     // this.__generateUpdateRequest(entity.id, path.join('.'), '');
+      //   });
+      // });
     }
   }
 

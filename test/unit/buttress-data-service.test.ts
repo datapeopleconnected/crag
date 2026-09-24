@@ -660,6 +660,107 @@ describe('ButtressDataService writes', () => {
     expect([set.outcome(), created.outcome(), deleted.outcome()]).to.deep.equal(['resolved', 'resolved', 'resolved']);
   });
 
+  it('sends a set and then a delete of the same entity in one go', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.name', 'b');
+    ds.delete('x');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } },
+      { method: 'DELETE', path: '/x', body: undefined },
+    ]);
+  });
+
+  it('sends a set of an entity already in the store as updates to the properties that changed', async () => {
+    const ds = withEntity();
+    const entity = ds.get('organisation.x');
+
+    ds.set('organisation.x', { ...entity, name: 'b', address: { city: 'York' } });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } },
+      { method: 'PUT', path: '/x', body: { path: 'address', value: { city: 'York' } } },
+    ]);
+  });
+
+  it('fills in the id of an entity set without one', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.y', { name: 'y' });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'POST', path: '/', body: { name: 'y', id: 'y' } }]);
+  });
+
+  it('throws when an entity is set with a different id', () => {
+    const ds = withEntity();
+
+    expect(() => ds.set('organisation.y', { id: 'z', name: 'y' })).to.throw(/'z'.*'y'/);
+    expect(ds.get('organisation.y')).to.equal(undefined);
+  });
+
+  it('sends nothing, and resolves dboComplete, for a set inside an object that is not in the store', async () => {
+    const ds = withEntity();
+    const { dboComplete, outcome } = tracked();
+
+    ds.set('organisation.missing.name', 'b', { dboComplete });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(outcome()).to.equal('resolved');
+  });
+
+  it('still sends and notifies other changes made alongside a set inside an object that is not in the store', async () => {
+    const store = new ButtressStore();
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      store,
+      writeSchema,
+    );
+    store.get('organisation').set('x', { id: 'x', name: 'a' });
+    // Past the notification of the data service setting up its collection.
+    await flush();
+    const notified: string[] = [];
+    store.subscribe('organisation.*', (cr: { path: string }) => notified.push(cr.path));
+
+    ds.set('organisation.missing.name', 'b');
+    ds.set('organisation.x.name', 'b');
+    await settle(ds);
+
+    expect(notified).to.deep.equal(['organisation.x.name']);
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } }]);
+  });
+
+  it('sends nothing, and returns false, for a delete of an entity that is not in the store', async () => {
+    const ds = withEntity();
+    const { dboComplete, outcome } = tracked();
+
+    expect(ds.delete('missing', { dboComplete })).to.equal(false);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(outcome()).to.equal('resolved');
+  });
+
+  it('resolves dboComplete for writes that are not sent', async () => {
+    const ds = withEntity();
+    const local = tracked();
+    const silent = tracked();
+    const created = tracked();
+
+    ds.set('organisation.x.name', 'b', { localOnly: true, dboComplete: local.dboComplete });
+    ds.set('organisation.x.address.city', 'York', { silent: true, dboComplete: silent.dboComplete });
+    ds.create({ id: 'y', name: 'y' }, { localOnly: true, dboComplete: created.dboComplete });
+    await settle(ds);
+
+    expect([local.outcome(), silent.outcome(), created.outcome()]).to.deep.equal(['resolved', 'resolved', 'resolved']);
+  });
+
   it('rejects dboComplete when Buttress rejects the write', async () => {
     const ds = withEntity();
     const { dboComplete, outcome } = tracked();

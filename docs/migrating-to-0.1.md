@@ -275,6 +275,15 @@ realtime updates whose `data.clientSessionId` matches.
 - **`$exists` matches on whether the property is there.** Locally it used to be the same test as `$eq`, so
   `{ $exists: true }` only matched properties whose value was `true`. It now matches as Buttress does: `true` for a
   property that's present, even if it's `null`, and `false` for one that's missing.
+- **`set`, `create` and `delete` send their own requests.** They used to be worked out from the store's change
+  notifications a moment later, which went wrong in several ways that are now fixed:
+  - a `set` and then a `delete` of the same entity in one go threw an error, and the delete wasn't sent;
+  - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends the
+    top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing;
+  - a `set` inside an object that isn't in the store notified subscribers of a change that never happened, and threw
+    an error that could stop other subscribers hearing about other changes. It now does nothing;
+  - deleting an entity that isn't in the store threw an error. It now does nothing and returns `false`;
+  - `dboComplete` was never called for `localOnly`, `silent` or `forceChanged` writes. It's now called straight away.
 - **Requests for the same entity reach Buttress in order.** crag sends adds and deletes ahead of other requests, and
   combines adds or updates into bulk requests. That could send a delete ahead of an earlier update to the same
   entity, so the update failed. It now never moves a request ahead of an earlier one for the same entity.
