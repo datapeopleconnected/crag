@@ -407,6 +407,64 @@ describe('ButtressDataService query', () => {
 
     expect(names(results)).to.deep.equal(['A00', ...range(1, 25).filter((n) => n !== 'A03')]);
   });
+
+  it('sends the sort direction to Buttress', async () => {
+    const ds = dataService();
+
+    const { results } = await ds.query(active, { limit: 3, sort: { path: 'name', direction: 'DESC' } });
+
+    expect(names(results)).to.deep.equal(['A25', 'A24', 'A23']);
+  });
+
+  it('merges an entity the server sends twice', async () => {
+    const ds = dataService();
+    const fetchPage = window.fetch;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'SEARCH' && !new URL(input.toString()).pathname.endsWith('/count')) {
+        return new Response(
+          JSON.stringify([
+            { id: 'id01', name: 'A01' },
+            { id: 'id01', status: 'active' },
+          ]),
+        );
+      }
+      return fetchPage(input, init);
+    };
+
+    const { results } = await ds.query(active, { limit: 10 });
+
+    expect(results).to.deep.equal([{ id: 'id01', name: 'A01', status: 'active' }]);
+  });
+
+  it('returns an empty page when the query cache is cleared while the page loads', async () => {
+    const ds = dataService();
+    const fetchPage = window.fetch;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      // A resync clearing the cache between the search and the count.
+      if (new URL(input.toString()).pathname.endsWith('/count')) ds.clearQueryMap();
+      return fetchPage(input, init);
+    };
+
+    const { results, total } = await ds.query(active, { limit: 10 });
+
+    expect(results).to.deep.equal([]);
+    expect(total).to.equal(25);
+  });
+
+  it('logs the query and throws when the store cannot run it', async () => {
+    const ds = dataService();
+    window.fetch = async (input: RequestInfo | URL) =>
+      new Response(new URL(input.toString()).pathname.endsWith('/count') ? '0' : '[]');
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+
+    const err = await ds.query({ status: null }).catch((e: unknown) => e);
+    console.error = originalError;
+
+    expect(err).to.be.instanceOf(TypeError);
+    expect(logged).to.have.length(1);
+  });
 });
 
 describe('ButtressDataService $exists', () => {
@@ -881,5 +939,198 @@ describe('ButtressDataService writes', () => {
     console.error = originalError;
 
     expect(outcome()).to.equal('rejected');
+  });
+
+  it('throws for a create with the id of an entity in the store', () => {
+    const ds = withEntity();
+
+    expect(() => ds.create({ id: 'x', name: 'b' })).to.throw('Unable to create entity with duplicate id');
+  });
+
+  it('sends nothing for a set of the whole collection', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation', new Map());
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(ds.get('organisation').size).to.equal(0);
+  });
+
+  it('sends nothing for a set of an entity in the store to null', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x', null);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('creates the array, and sends each item, for a splice into an array that is not in the store', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', contacts: [{ id: 'c1' }] });
+
+    ds.splice('organisation.y.contacts.0.phones', 0, 0, '0113');
+    await settle(ds);
+
+    expect(ds.get('organisation.y.contacts.0.phones')).to.deep.equal(['0113']);
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/y', body: { path: 'contacts.0.phones', value: '0113' } }]);
+  });
+
+  it('passes notifyPath to the store, which reports whether the value changed', () => {
+    const ds = withEntity();
+
+    expect(ds.notifyPath('organisation.x.name', 'b')).to.equal(true);
+    expect(ds.notifyPath('organisation.x.tags', ds.get('organisation.x.tags'))).to.equal(false);
+  });
+
+  it('uses the schema from updateSchema for arrays it creates', () => {
+    const ds = withEntity();
+
+    ds.updateSchema({ name: 'organisation', type: 'collection', properties: { links: { __type: 'array' } } });
+
+    expect(ds.pushExt('organisation.x.links', { localOnly: true }, 'a')).to.equal(1);
+    expect(() => ds.pushExt('organisation.x.address.lines', { localOnly: true }, 'a')).to.throw(/non-array/);
+  });
+});
+
+describe('ButtressDataService getById', () => {
+  let originalFetch: typeof window.fetch;
+  let gets: number;
+  let onGet: () => void;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    gets = 0;
+    onGet = () => {};
+    window.fetch = async (input: RequestInfo | URL) => {
+      gets += 1;
+      onGet();
+      const id = new URL(input.toString()).pathname.split('/').pop();
+      return new Response(JSON.stringify({ id, name: 'from server' }));
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      schema,
+    );
+
+  it('fetches an entity that is not in the store, and keeps it', async () => {
+    const ds = dataService();
+
+    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'from server' });
+    expect(ds.get('organisation.x')).to.deep.equal({ id: 'x', name: 'from server' });
+  });
+
+  it('returns an entity already in the store without fetching it', async () => {
+    const ds = dataService();
+    ds.get('organisation').set('x', { id: 'x', name: 'local' });
+
+    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'local' });
+    expect(gets).to.equal(0);
+  });
+
+  it('keeps the entity in the store if one arrived while fetching', async () => {
+    const ds = dataService();
+    onGet = () => ds.get('organisation').set('x', { id: 'x', name: 'local' });
+
+    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'from server' });
+    expect(ds.get('organisation.x')).to.deep.equal({ id: 'x', name: 'local' });
+  });
+});
+
+describe('ButtressDataService local sort', () => {
+  const b = { id: 'b', name: 'beta', size: 2, founded: '2001-01-01' };
+  const none = { id: 'none' };
+  const a = { id: 'a', name: 'Alpha', size: 10, founded: '1999-01-01' };
+
+  const sorted = (entities: ButtressEntity[], sort: object) => {
+    const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+    entities.forEach((entity) => ds.get('organisation').set(entity.id, entity));
+    return (ds as any).__filterLocalData({}, sort).map((entity: ButtressEntity) => entity.id);
+  };
+
+  it('sorts strings without regard to case, with missing values first', () => {
+    expect(sorted([b, none, a], { path: 'name', direction: 'ASC' })).to.deep.equal(['none', 'a', 'b']);
+    expect(sorted([b, none, a], { path: 'name', direction: 'DESC' })).to.deep.equal(['b', 'a', 'none']);
+  });
+
+  it('sorts numbers', () => {
+    expect(sorted([a, b], { path: 'size', type: 'NUMBER', direction: 'ASC' })).to.deep.equal(['b', 'a']);
+    expect(sorted([b, a], { path: 'size', type: 'NUMBER', direction: 'DESC' })).to.deep.equal(['a', 'b']);
+  });
+
+  it('sorts dates, with missing values first', () => {
+    expect(sorted([b, none, a], { path: 'founded', type: 'DATE', direction: 'ASC' })).to.deep.equal(['none', 'a', 'b']);
+    expect(sorted([b, none, a], { path: 'founded', type: 'DATE', direction: 'DESC' })).to.deep.equal([
+      'b',
+      'a',
+      'none',
+    ]);
+  });
+});
+
+describe('ButtressDataService query operators', () => {
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const data = [
+    { id: 'a', name: 'Alpha', tags: ['x', 'y'], founded: new Date('2000-01-01'), links: [new Map([['kind', 'web']])] },
+    { id: 'b', name: 'Beta', tags: ['y'], founded: new Date('2010-01-01'), links: [] },
+    { id: 'c', name: 'Gamma', tags: [], founded: null, links: [] },
+  ];
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  it('matches every part of an $and', () => {
+    expect(ids({ $and: [{ tags: { $eq: 'y' } }, { name: { $eq: 'Beta' } }] })).to.deep.equal(['b']);
+  });
+
+  it('matches any part of an $or, once each', () => {
+    expect(
+      ids({ $or: [{ name: { $eq: 'Gamma' } }, { tags: { $eq: 'y' } }, { name: { $eq: 'Alpha' } }] }),
+    ).to.deep.equal(['c', 'a', 'b']);
+  });
+
+  it('matches $inProp against an array property', () => {
+    expect(ids({ tags: { $inProp: 'x' } })).to.deep.equal(['a']);
+  });
+
+  it('matches dates with $gteDate and $lteDate, including the date itself', () => {
+    expect(ids({ founded: { $gteDate: '2010-01-01' } })).to.deep.equal(['b']);
+    expect(ids({ founded: { $lteDate: '2000-01-01' } })).to.deep.equal(['a']);
+    expect(ids({ founded: { $gteDate: '2000-01-01', $lteDate: '2010-01-01' } })).to.deep.equal(['a', 'b']);
+  });
+
+  it('matches nothing for a date operator with a null operand', () => {
+    for (const operator of ['$gtDate', '$ltDate', '$gteDate', '$lteDate']) {
+      expect(ids({ founded: { [operator]: null } }), operator).to.deep.equal([]);
+    }
+  });
+
+  it('looks up a path through a Map in an array', () => {
+    expect(ids({ 'links.kind': { $eq: 'web' } })).to.deep.equal(['a']);
+  });
+
+  it('finds nothing on a path through a string', () => {
+    expect(ids({ 'name.first': { $exists: true } })).to.deep.equal([]);
+  });
+
+  it('logs an unknown operator and matches nothing', () => {
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+
+    const matched = ids({ name: { $like: 'A' } });
+    console.error = originalError;
+
+    expect(matched).to.deep.equal([]);
+    expect(logged).to.have.length(1);
   });
 });

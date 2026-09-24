@@ -139,4 +139,10 @@ describe('ButtressRequestQueue', () => {
 
     expect((queue as unknown as { _idleWaiters: unknown[] })._idleWaiters.length).to.equal(0);
   });
+
+  it('bundles adds that do not name their entity', async () => {
+    const anonymous = (body: string): QueuedRequest => ({ type: 'add', method: 'POST', url: 'add', body });
+
+    expect(await run(search(), anonymous('a'), anonymous('b'))).to.deep.equal(['SEARCH search', 'POST bulk ["a","b"]']);
+  });
 });

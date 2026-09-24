@@ -251,23 +251,12 @@ export class ButtressDbService extends LitElement {
     await this._realtime.connect();
   }
 
+  // connect() has checked the settings.
   private async _connect() {
     this._connected = false;
-    if (!this._settings?.endpoint) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
-    }
-    if (!this._settings?.token) {
-      throw new Error(`Missing setting 'token' while trying to connect`);
-    }
 
-    // Test the connection to buttress
-
-    // Kick off realtime sync
-
-    await this._fetchAppSchema();
-    // TODO: Handle errors
-
-    await this._refreshLocalDataServices();
+    this._schema = await this._fetchAppSchema();
+    this._refreshLocalDataServices(this._schema);
 
     this._connected = true;
     this._settleAwaitingConnection();
@@ -280,32 +269,29 @@ export class ButtressDbService extends LitElement {
     waiting.forEach(({ resolve, reject }) => (failure ? reject(failure.err) : resolve()));
   }
 
-  private async _fetchAppSchema() {
+  // The app's schemas, keyed by local name.
+  private async _fetchAppSchema(): Promise<{ [key: string]: ButtressSchema }> {
     this._logger.debug('_fetchAppSchema', this._settings);
-    if (!this._settings) return;
 
     const coreSchema = this._settings.coreSchema || [];
     const body = await this._client.request<ButtressSchema[]>('GET', `${this._settings.endpoint}/api/v1/app/schema`, {
       query: coreSchema.length > 0 ? { core: coreSchema.join(',') } : {},
     });
-    this._schema = body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
+    this._logger.debug(body);
+    return body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
       obj[schema.core ? coreSchemaLocalName(schema.name) : schema.name] = schema;
       return obj;
     }, {});
-    this._logger.debug(body);
   }
 
-  private async _refreshLocalDataServices() {
-    if (!this._schema || !this._settings) return;
-
-    const schemas: string[] = Object.keys(this._schema || []);
-    const dataServices: string[] = Object.keys(this._dataServices || []);
+  private _refreshLocalDataServices(schemaMap: { [key: string]: ButtressSchema }) {
+    const schemas: string[] = Object.keys(schemaMap);
+    const dataServices: string[] = Object.keys(this._dataServices);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
-    // _schema is keyed by local name, which also names the data service.
+    // The schemas are keyed by local name, which also names the data service.
     schemas.forEach((name) => {
-      if (!this._schema) return;
-      const schema = this._schema[name];
+      const schema = schemaMap[name];
       if (dataServices.includes(name)) {
         this._dataServices[name].updateSchema(schema);
       } else {
@@ -345,8 +331,7 @@ export class ButtressDbService extends LitElement {
     this._realtime.setLogLevel(level);
     this._store.setLogLevel(level);
 
-    const dataServices: string[] = Object.keys(this._dataServices || []);
-    dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
+    Object.values(this._dataServices).forEach((ds) => ds.setLogLevel(level));
   }
 
   create(path: string, value: ButtressEntity, opts: WaitOpts): Promise<string | undefined>;

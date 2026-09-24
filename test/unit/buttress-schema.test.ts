@@ -94,3 +94,60 @@ describe('ButtressStore.pushExt', () => {
     );
   });
 });
+
+describe('ButtressSchemaHelpers.getSubSchema', () => {
+  it('returns null for a path the schema does not have', () => {
+    expect(ButtressSchemaHelpers.getSubSchema(schema, 'missing')).to.equal(null);
+    expect(ButtressSchemaHelpers.getSubSchema(schema, 'missing.email')).to.equal(null);
+  });
+});
+
+describe('ButtressSchemaHelpers.inflate', () => {
+  const nested: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: {
+      // @ts-expect-error ButtressSchemaProperty can't type a plain nested object, though inflate handles one.
+      address: { street: { __type: 'string' }, geo: { lat: { __type: 'number' }, lng: { __type: 'number' } } },
+    },
+  };
+
+  it('builds nested objects', () => {
+    expect(ButtressSchemaHelpers.inflate(nested, false)).to.deep.equal({
+      address: { street: '', geo: { lat: 0, lng: 0 } },
+    });
+  });
+
+  it('keeps an id the schema gives', () => {
+    const withId: ButtressSchema = {
+      name: 'organisation',
+      type: 'collection',
+      properties: { id: { __type: 'id', __default: 'fixed' } },
+    };
+
+    expect(ButtressSchemaHelpers.inflate(withId, true)).to.deep.equal({ id: 'fixed' });
+  });
+});
+
+describe('ButtressSchemaHelpers.clean', () => {
+  const typed: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: { active: { __type: 'boolean' }, size: { __type: 'number' }, name: { __type: 'string' } },
+  };
+
+  it('turns a string into the type of the property at the path', () => {
+    expect(ButtressSchemaHelpers.clean(typed, 'active', 'True')).to.equal(true);
+    expect(ButtressSchemaHelpers.clean(typed, 'active', 'yes')).to.equal(false);
+    expect(ButtressSchemaHelpers.clean(typed, 'size', '£1,200.50')).to.equal('1200.50');
+  });
+
+  it('leaves other values alone', () => {
+    expect(ButtressSchemaHelpers.clean(typed, 'name', 'a')).to.equal('a');
+    expect(ButtressSchemaHelpers.clean(typed, 'missing', 'a')).to.equal('a');
+  });
+
+  it('returns false without a schema', () => {
+    expect(ButtressSchemaHelpers.clean(undefined as unknown as ButtressSchema, 'name', 'a')).to.equal(false);
+  });
+});

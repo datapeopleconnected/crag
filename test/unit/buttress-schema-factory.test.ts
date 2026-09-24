@@ -113,3 +113,42 @@ describe('ButtressSchemaFactory.getObjectId', () => {
     expect(ButtressSchemaFactory.getPropDefault({ __type: 'id', __default: 'new' })).to.match(/^[0-9a-f]{24}$/);
   });
 });
+
+describe('ButtressSchemaFactory.create without a schema', () => {
+  it('throws', () => {
+    expect(() => ButtressSchemaFactory.create(undefined as unknown as ButtressSchema, 'organisation')).to.throw(
+      'Missing primarySchema when attempting to create blank object',
+    );
+  });
+});
+
+describe('ButtressSchemaFactory.getPropDefault', () => {
+  const defaultOf = (config: object) => ButtressSchemaFactory.getPropDefault(config as ButtressSchemaProperty);
+
+  it('uses the __default when there is one', () => {
+    expect(defaultOf({ __type: 'boolean', __default: true })).to.equal(true);
+    expect(defaultOf({ __type: 'string', __default: 'a' })).to.equal('a');
+    expect(defaultOf({ __type: 'number', __default: 5 })).to.equal(5);
+    expect(defaultOf({ __type: 'id', __default: 'fixed' })).to.equal('fixed');
+    expect(defaultOf({ __type: 'other', __default: 'x' })).to.equal('x');
+  });
+
+  it('falls back to an empty value of the type', () => {
+    expect(defaultOf({ __type: 'boolean' })).to.equal(false);
+    expect(defaultOf({ __type: 'string' })).to.equal('');
+    expect(defaultOf({ __type: 'number' })).to.equal(0);
+    expect(defaultOf({ __type: 'array' })).to.deep.equal([]);
+    expect(defaultOf({ __type: 'object' })).to.deep.equal({});
+    expect(defaultOf({ __type: 'id' })).to.equal(null);
+    expect(defaultOf({ __type: 'other' })).to.equal(false);
+  });
+
+  it('gives a date the __default date, null, or now', () => {
+    expect(defaultOf({ __type: 'date', __default: '2020-01-01T00:00:00.000Z' })).to.deep.equal(
+      new Date('2020-01-01T00:00:00.000Z'),
+    );
+    expect(defaultOf({ __type: 'date', __default: null })).to.equal(null);
+    const now = defaultOf({ __type: 'date' }) as Date;
+    expect(Math.abs(now.getTime() - Date.now())).to.be.below(1000);
+  });
+});

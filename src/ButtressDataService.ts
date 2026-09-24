@@ -279,7 +279,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async getById(id: string) {
     const storeEntity = this.get(`${this.name}.${id}`);
     if (storeEntity) return storeEntity;
-    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
     const entity = await this.__generateGetByIdRequest(id);
 
@@ -293,8 +292,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
-    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
-
     // Fetches the matching entities into the local store, unless this search is cached.
     await this.search(buttressQuery, opts);
 
@@ -436,8 +433,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   };
 
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    // Each operator takes its operand and returns the filter for it (the date ones return false for a null operand).
-    const fns: { [key: string]: (rhs: any) => ((lhs: any) => boolean) | false } = {
+    // Each operator takes its operand and returns the filter for it. A date operator with a null operand matches nothing.
+    const fns: { [key: string]: (rhs: any) => (lhs: any) => boolean } = {
       $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
       $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
       $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,
@@ -459,7 +456,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
       $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
       $gtDate: (rhs: any) => {
-        if (rhs === null) return false;
+        if (rhs === null) return () => false;
         const rhsDate = DateCreate(rhs);
 
         return (lhs: any) =>
@@ -469,7 +466,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
           }) !== -1;
       },
       $ltDate: (rhs: any) => {
-        if (rhs === null) return false;
+        if (rhs === null) return () => false;
         const rhsDate = DateCreate(rhs);
 
         return (lhs: any) =>
@@ -479,7 +476,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
           }) !== -1;
       },
       $gteDate: (rhs: any) => {
-        if (rhs === null) return false;
+        if (rhs === null) return () => false;
         const rhsDate = DateCreate(rhs);
 
         return (lhs: any) =>
@@ -489,7 +486,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
           }) !== -1;
       },
       $lteDate: (rhs: any) => {
-        if (rhs === null) return false;
+        if (rhs === null) return () => false;
         const rhsDate = DateCreate(rhs);
 
         return (lhs: any) =>
@@ -509,8 +506,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
-    if (!this._settings) return undefined;
-
     const key = this.__queryKey(buttressQuery, opts);
     const paged = ButtressDataService.__isPaged(opts);
     const generation = this.__pageGeneration;

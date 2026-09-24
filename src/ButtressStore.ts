@@ -288,22 +288,16 @@ export class ButtressStore implements ButtressStoreInterface {
     let prop: any = this.__data;
 
     const last = parts[parts.length - 1];
-    if (parts.length > 1) {
-      for (let i = 0; i < parts.length - 1; i += 1) {
-        const part = parts[i];
-        prop = prop instanceof Map ? prop.get(part) : prop[part];
-        if (!prop) return undefined;
-      }
-      // Set value to object at end of path
-      if (prop instanceof Map) {
-        prop.set(last, value);
-      } else {
-        prop[last] = value;
-      }
-    } else if (prop instanceof Map) {
-      prop.set(path, value);
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const part = parts[i];
+      prop = prop instanceof Map ? prop.get(part) : prop[part];
+      if (!prop) return undefined;
+    }
+    // Set value to object at end of path
+    if (prop instanceof Map) {
+      prop.set(last, value);
     } else {
-      prop[path] = value;
+      prop[last] = value;
     }
 
     return parts.join('.');
@@ -423,7 +417,7 @@ export class ButtressStore implements ButtressStoreInterface {
     const values: CR[] = [];
 
     for (let i = 0, l = args.length; i < l; i += 1) {
-      const { name, structured, wildcard, argVal, literal } = args[i];
+      const { name, structured, wildcard, value: argVal, literal } = args[i];
       let value = argVal;
       if (!literal) {
         if (wildcard) {
