@@ -46,6 +46,9 @@ export default class ButtressDataRealtime {
 
   private _isConnected: boolean = false;
 
+  // Survives replacing the socket: updates sent while this instance had no connection are lost either way.
+  private _hasConnected: boolean = false;
+
   private readonly _rxEvents: string[] = ['db-activity', 'clear-local-db', 'db-connect-room', 'db-disconnect-room'];
 
   constructor(
@@ -68,7 +71,7 @@ export default class ButtressDataRealtime {
       throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
     }
     if (!this._settings?.token) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect`);
+      throw new Error(`Missing setting 'token' while trying to connect`);
     }
 
     const uri = this._settings?.apiPath
@@ -125,6 +128,19 @@ export default class ButtressDataRealtime {
 
   private _onConnected() {
     this._connected = true;
+    if (this._hasConnected) this._resync();
+    this._hasConnected = true;
+  }
+
+  // Buttress can't replay the updates sent while there was no connection, so cached queries are
+  // searched for again, and the app is told so it can reload what it's showing.
+  private _resync() {
+    this._logger.debug(`Resyncing after a reconnection`);
+    this._store.clearQueryMaps();
+    this._dispatchCustomEvent('bjs-resync', {
+      bubbles: true,
+      composed: true,
+    });
   }
 
   private _onDisconnected() {

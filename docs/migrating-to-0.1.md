@@ -251,6 +251,9 @@ realtime updates whose `data.clientSessionId` matches.
 - **Missing entities are fetched once.** When a realtime update arrives for an entity that isn't in the store, crag
   fetches it. Previously a handler for this was added every time the element connected and never removed, so after the
   element had been attached N times, each of these updates caused N fetches.
+- **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
+  connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
+  reload what you're showing. Entities already in the store keep their values until a query fetches them again.
 - **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
   request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
   Buttress has responded to every request, including any queued while it waits.

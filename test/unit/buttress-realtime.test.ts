@@ -94,4 +94,71 @@ describe('ButtressRealtime', () => {
 
     expect(created).to.deep.equal([['organisation', { id: 'org1', name: 'New' }, { localOnly: true }]]);
   });
+
+  describe('resync', () => {
+    const setup = () => {
+      const calls: string[] = [];
+      const store = { clearQueryMaps: () => calls.push('clearQueryMaps') };
+      const settings = buildSettings({});
+      settings.endpoint = 'http://127.0.0.1:1';
+      settings.token = 'abc';
+      const realtime = new ButtressRealtime(
+        store as any,
+        settings,
+        (type: string) => calls.push(type),
+        () => {},
+      );
+      const connected = () => (realtime as any)._onConnected();
+      return { realtime, calls, connected, resyncs: () => calls.filter((c) => c === 'bjs-resync').length };
+    };
+
+    it('does not resync on the first connection', () => {
+      const { realtime, connected, resyncs } = setup();
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(0);
+      realtime.disconnect();
+    });
+
+    it('clears the query caches, then dispatches bjs-resync, on a reconnection', () => {
+      const { realtime, calls, connected, resyncs } = setup();
+      realtime.connect();
+      connected();
+
+      calls.length = 0;
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      expect(calls.indexOf('clearQueryMaps')).to.be.lessThan(calls.indexOf('bjs-resync'));
+      realtime.disconnect();
+    });
+
+    it('resyncs when a new socket connects after the old one was closed', () => {
+      const { realtime, connected, resyncs } = setup();
+      realtime.connect();
+      connected();
+      realtime.disconnect();
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      realtime.disconnect();
+    });
+  });
+
+  it('names the token when the token is missing', () => {
+    const settings = buildSettings({});
+    settings.endpoint = 'http://127.0.0.1:1';
+    const realtime = new ButtressRealtime(
+      {} as any,
+      settings,
+      () => {},
+      () => {},
+    );
+
+    expect(() => realtime.connect()).to.throw(/'token'/);
+  });
 });
