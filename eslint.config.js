@@ -15,6 +15,7 @@ export default defineConfig([
       'test-results/**',
       'dist/**',
       '.test-bundle/**',
+      'coverage/**',
       '.claude/**',
     ],
   },

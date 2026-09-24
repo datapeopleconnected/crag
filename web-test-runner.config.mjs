@@ -27,6 +27,7 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
       }
     }}),
     replace({
+      preventAssignment: true,
       "BUILD_REPLACE_TESTE2E_WITH_ENDPOINT": env.BUTTRESS_E2E_ENDPOINT,
       "BUILD_REPLACE_TESTE2E_WITH_APP_TOKEN": env.BUTTRESS_E2E_APP_TOKEN,
       "BUILD_REPLACE_TESTE2E_WITH_USER1_TOKEN": env.BUTTRESS_E2E_USER1_TOKEN,
