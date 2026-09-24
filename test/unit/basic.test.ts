@@ -16,9 +16,9 @@
 
 import { expect } from '@open-wc/testing';
 
-import ButtressDataService from '../../ButtressDataService';
-import ButtressStore from '../../ButtressStore.js';
-import ButtressSchema from '../../ButtressSchema';
+import ButtressDataService from '../../src/ButtressDataService.js';
+import ButtressStore from '../../src/ButtressStore.js';
+import ButtressSchema from '../../src/ButtressSchema.js';
 
 describe('processQueryPart', () => {
   const store = new ButtressStore();

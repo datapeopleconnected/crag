@@ -4,7 +4,9 @@ import { esbuildPlugin } from '@web/dev-server-esbuild';
 const filteredLogs = ['Running in dev mode', 'lit-html is in dev mode'];
 
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
-  files: 'dist/test/unit/*.test.js',
+  // Served straight from source: esbuild strips the types and maps the `.js`
+  // imports onto their `.ts` files, so no build step is needed first.
+  files: 'test/unit/**/*.test.ts',
   plugins: [
     importMapsPlugin({ inject: {
       importMap: {
@@ -13,7 +15,8 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
         }
       }
     }}),
-    esbuildPlugin({ ts: true })
+    // tsconfig so esbuild compiles src/ as tsc does (experimentalDecorators, target).
+    esbuildPlugin({ ts: true, tsconfig: 'tsconfig.json' })
   ],
 
   /** Resolve bare module imports */

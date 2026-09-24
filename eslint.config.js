@@ -19,9 +19,7 @@ export default defineConfig([
   },
   ...openWC,
   {
-    // stories/ holds the only TypeScript outside src/; without it here the
-    // default parser trips over `interface`.
-    files: ['src/**/*.{ts,js,mjs,cjs}', 'stories/**/*.ts'],
+    files: ['src/**/*.{ts,js,mjs,cjs}', 'test/**/*.ts'],
     languageOptions: {
       parser: tsParser,
       ecmaVersion: 'latest',

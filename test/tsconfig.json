@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "incremental": false,
+    // The e2e test imports the package by name. Without these, its types only
+    // resolve once dist/ has been built, so typecheck fails on a fresh clone.
+    // Keep in step with "exports" in package.json. Types only: at runtime the
+    // test runners resolve through the exports map to dist/.
+    "paths": {
+      "@buttress/crag": ["../src/index.ts"],
+      "@buttress/crag/components/buttress-db-service.js": ["../src/components/buttress-db-service.ts"]
+    }
+  },
+  "include": ["**/*.ts"]
+}
