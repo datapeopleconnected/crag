@@ -18,6 +18,7 @@ components get hold of it, and which version of Lit they use.
 | Children of the element     | Not shown                                | Shown through a slot                               |
 | Listening for events        | `eventSubscribe(name, (detail) => …)`    | `addEventListener(name, (e) => … e.detail …)`      |
 | Logging                     | `LtnLogger`                              | crag's own logger, with the same attributes        |
+| Skipping your own updates   | Matched by `userId`                      | Matched by a session id for each element           |
 
 ## 1. Update your dependencies
 
@@ -218,6 +219,21 @@ A listener receives the event, where an `eventSubscribe` callback received its `
 If you use TypeScript's `experimentalDecorators`, set `useDefineForClassFields: false` in your `tsconfig.json`. Lit
 requires it for decorated fields. It's already the default for targets older than ES2022.
 
+## 9. Check that your Buttress server sends `clientSessionId`
+
+Buttress sends a realtime update back to the client whose change caused it. crag skips those updates because it
+already applied the change locally. It used to recognise them by `userId`. Now each `<buttress-db-service>` creates its
+own session id when it's constructed, sends it with its data requests in an `x-client-session-id` header, and skips
+realtime updates whose `data.clientSessionId` matches.
+
+- Your Buttress server must read the header and include `clientSessionId` in the realtime payloads it sends. If it
+  doesn't, crag applies its own changes a second time when they come back.
+- Two tabs, or two elements, signed in as the same user now see each other's changes in real time. Before, they
+  skipped them because the `userId` matched.
+- `userId` is still used for access-control updates, so keep setting it.
+- If you build a `Settings` object in TypeScript, it now needs a `clientSessionId` string, such as one from
+  `crypto.randomUUID()`.
+
 ## Removed APIs
 
 | 0.0.x                                                     | Replacement                                                     |
@@ -268,3 +284,4 @@ moves between them keeps the first unless it consumes with `subscribe: true`.
 - [ ] Nothing calls `LtnTrader.registerService()` for the element.
 - [ ] `eventSubscribe()` is replaced with `addEventListener()`.
 - [ ] `useDefineForClassFields` is `false` if you use `experimentalDecorators`.
+- [ ] Your Buttress server includes `clientSessionId` in its realtime payloads.

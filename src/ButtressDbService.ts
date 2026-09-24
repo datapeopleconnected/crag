@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import { LitElement, css, html } from 'lit';
+import { LitElement, css, html, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
 import { ContextProvider } from '@lit/context';
 
@@ -577,7 +577,7 @@ export class ButtressDbService extends LitElement {
     }
   }
 
-  render() {
+  render(): TemplateResult {
     return html`<slot></slot>`;
   }
 }
