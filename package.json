@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/datapeopleconnected/crag.git"
   },
-  "version": "0.0.21",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
