@@ -98,6 +98,14 @@ export default class ButtressDataRealtime {
     }
   }
 
+  disconnect() {
+    if (!this._socket) return;
+
+    this._logger.debug(`Closing connection`);
+    this._socket.disconnect();
+    this._socket = null;
+  }
+
   set _connected(state: boolean) {
     this._isConnected = state;
     this._logger.debug(state ? `Connected` : `Disconnected`);

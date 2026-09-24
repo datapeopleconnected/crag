@@ -109,3 +109,40 @@ describe('ButtressDbService logging', () => {
     expect(disconnectedMessages()).to.deep.equal([]);
   });
 });
+
+describe('ButtressDbService settings', () => {
+  it('syncs property changes into settings in a single update', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+
+    el.endpoint = 'https://example.test';
+    el.token = 'abc';
+    el.userId = 'user-1';
+    el.coreSchema = ['app'];
+
+    // updateComplete resolves false if another update was requested during this one.
+    expect(await el.updateComplete).to.equal(true);
+    expect(el.getEndpoint()).to.equal('https://example.test');
+    expect(el.getToken()).to.equal('abc');
+    expect(el.getUserId()).to.equal('user-1');
+    expect(el.getCoreSchemas()).to.deep.equal(['app']);
+  });
+});
+
+describe('ButtressDbService realtime', () => {
+  it('closes the realtime connection when removed', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+    const realtime = (el as any)._realtime;
+    let disconnects = 0;
+    realtime.disconnect = () => {
+      disconnects += 1;
+    };
+
+    el.remove();
+
+    expect(disconnects).to.equal(1);
+  });
+});

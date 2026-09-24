@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import { LitElement, css, html, type TemplateResult } from 'lit';
+import { LitElement, css, html, type PropertyValues, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
 import { ContextProvider } from '@lit/context';
 
@@ -151,6 +151,7 @@ export class ButtressDbService extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._logger.debug(`disconnectedCallback`);
+    this._realtime.disconnect();
   }
 
   private _initLogger() {
@@ -438,32 +439,14 @@ export class ButtressDbService extends LitElement {
     this._settings.coreSchema = coreSchema;
   }
 
-  updated(changedProperties: Map<string, unknown>) {
-    let update = false;
-    changedProperties.forEach((oldValue, propName) => {
-      if (propName === 'endpoint') {
-        this._settings.endpoint = this.endpoint;
-        update = true;
-      } else if (propName === 'token') {
-        this._settings.token = this.token;
-        update = true;
-      } else if (propName === 'apiPath') {
-        this._settings.apiPath = this.apiPath;
-        update = true;
-      } else if (propName === 'userId') {
-        this._settings.userId = this.userId;
-        update = true;
-      } else if (propName === 'coreSchema') {
-        this._settings.coreSchema = this.coreSchema;
-        update = true;
-      }
-    });
-
-    if (update) {
-      this.requestUpdate();
-      // Trigger reconnection?
-      // this.connect();
-    }
+  // Runs before render, so the settings are in step without a second update cycle.
+  protected willUpdate(changedProperties: PropertyValues<this>) {
+    if (changedProperties.has('endpoint')) this._settings.endpoint = this.endpoint;
+    if (changedProperties.has('token')) this._settings.token = this.token;
+    if (changedProperties.has('apiPath')) this._settings.apiPath = this.apiPath;
+    if (changedProperties.has('userId')) this._settings.userId = this.userId;
+    if (changedProperties.has('coreSchema')) this._settings.coreSchema = this.coreSchema;
+    // Trigger reconnection?
   }
 
   _stripTrailingS(word: string): string {
