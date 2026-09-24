@@ -29,8 +29,13 @@ export default ButtressSchema;
 
 export class ButtressSchemaHelpers {
   static getSubSchema(schema: ButtressSchema, path: string): ButtressSchema | null {
+    let parent: ButtressSchemaProperty | undefined;
     return path.split('.').reduce((out: ButtressSchema | null, part: string) => {
       if (!out) return null;
+      if (ButtressSchemaHelpers.isItemIndex(parent, part)) {
+        parent = undefined;
+        return out;
+      }
 
       const property = ButtressStore.get(part, out.properties);
       if (!property) {
@@ -40,6 +45,7 @@ export class ButtressSchemaHelpers {
         return null;
       }
 
+      parent = property;
       return {
         name: path,
         properties: property.__schema || property,
@@ -171,15 +177,22 @@ export class ButtressSchemaHelpers {
 
     for (let i = 0; i < parts.length; i += 1) {
       if (!props) return undefined;
-      const part = parts[i];
+      const prop = props[parts[i]];
 
-      if (!props[part] && props[part].__schema) {
-        props = props[part].__schema;
+      if (prop?.__schema && i < parts.length - 1) {
+        props = prop.__schema;
+        if (ButtressSchemaHelpers.isItemIndex(prop, parts[i + 1])) i += 1;
       } else {
-        props = props[part];
+        props = prop;
       }
     }
 
     return props;
+  }
+
+  // Data paths name one item of an array (`contacts.0.phones`), while the schema describes all of
+  // them at once (`contacts.phones`), so getProperty and getSubSchema both step over the index.
+  private static isItemIndex(property: ButtressSchemaProperty | undefined, part: string): boolean {
+    return property?.__type === 'array' && !!property.__schema && /^\d+$/.test(part);
   }
 }
