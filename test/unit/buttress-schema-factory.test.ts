@@ -84,3 +84,32 @@ describe('ButtressSchemaFactory.create', () => {
     expect(app.__roles).to.deep.equal([]);
   });
 });
+
+// An ObjectId is a 4-byte timestamp, a 5-byte random value and a 3-byte counter, written as 24 hex characters.
+describe('ButtressSchemaFactory.getObjectId', () => {
+  it('returns 24 lower-case hex characters', () => {
+    expect(ButtressSchemaFactory.getObjectId()).to.match(/^[0-9a-f]{24}$/);
+  });
+
+  it('starts with the current time in seconds', () => {
+    const seconds = Math.floor(Date.now() / 1000);
+    const timestamp = parseInt(ButtressSchemaFactory.getObjectId().slice(0, 8), 16);
+    expect(timestamp).to.be.within(seconds, seconds + 1);
+  });
+
+  it('keeps the random value and steps the counter by one from each id to the next', () => {
+    const first = ButtressSchemaFactory.getObjectId();
+    const second = ButtressSchemaFactory.getObjectId();
+    expect(second.slice(8, 18)).to.equal(first.slice(8, 18));
+    expect(parseInt(second.slice(18), 16)).to.equal((parseInt(first.slice(18), 16) + 1) % 0x1000000);
+  });
+
+  it('returns a different id each time', () => {
+    const ids = new Set(Array.from({ length: 10000 }, () => ButtressSchemaFactory.getObjectId()));
+    expect(ids.size).to.equal(10000);
+  });
+
+  it("is the default for an id property set to 'new'", () => {
+    expect(ButtressSchemaFactory.getPropDefault({ __type: 'id', __default: 'new' })).to.match(/^[0-9a-f]{24}$/);
+  });
+});

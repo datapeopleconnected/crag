@@ -20,7 +20,6 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
     importMapsPlugin({ inject: {
       importMap: {
         imports: {
-          'crypto': '/node_modules/false-file.js',
           // socket.io-parser >=4.2.7 maps the 'development' condition (see nodeResolve below) to a
           // debug build that imports the CommonJS `debug` package, which browsers can't load.
           'socket.io-parser': '/node_modules/socket.io-parser/build/esm/index.js',

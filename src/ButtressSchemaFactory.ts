@@ -14,13 +14,16 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { ObjectId } from 'bson';
-
 import { ButtressSchema, ButtressSchemaHelpers } from './ButtressSchema.js';
 
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
 import { DateCreate } from './helpers.js';
+
+// An ObjectId is 12 bytes: a 4-byte timestamp in seconds, a 5-byte random value that stays the same for the page,
+// and a 3-byte counter that starts at a random value. This is the layout MongoDB and the bson package use.
+const objectIdRandom = crypto.getRandomValues(new Uint8Array(5));
+let objectIdCounter = crypto.getRandomValues(new Uint32Array(1))[0] % 0x1000000;
 
 export class ButtressSchemaFactory {
   static create(primarySchema: ButtressSchema, path: string) {
@@ -38,7 +41,14 @@ export class ButtressSchemaFactory {
   }
 
   static getObjectId(): string {
-    return new ObjectId().toHexString();
+    const bytes = new Uint8Array(12);
+    new DataView(bytes.buffer).setUint32(0, Math.floor(Date.now() / 1000));
+    bytes.set(objectIdRandom, 4);
+    objectIdCounter = (objectIdCounter + 1) % 0x1000000;
+    bytes[9] = objectIdCounter >> 16;
+    bytes[10] = (objectIdCounter >> 8) & 0xff;
+    bytes[11] = objectIdCounter & 0xff;
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
   static getPropDefault(config: ButtressSchemaProperty): null | string | [] | {} {
@@ -62,7 +72,7 @@ export class ButtressSchemaFactory {
         break;
       case 'id':
         if (config.__default && config.__default === 'new') {
-          res = new ObjectId().toHexString();
+          res = ButtressSchemaFactory.getObjectId();
         } else if (config.__default) {
           res = config.__default;
         } else {

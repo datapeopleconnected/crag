@@ -14,7 +14,6 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 import { Logger, LogLevel } from './Logger.js';
-import { ObjectId } from 'bson';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
@@ -233,7 +232,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
               // Remove .splices
               path.splice(-1, 1);
               if (typeof o === 'object' && !o.id) {
-                o.id = new ObjectId().toHexString();
+                o.id = ButtressSchemaFactory.getObjectId();
               }
 
               this.__generateUpdateRequest(entity.id, path.join('.'), o)

@@ -1,4 +1,3 @@
-import { importMapsPlugin } from '@web/dev-server-import-maps';
 import { esbuildPlugin } from '@web/dev-server-esbuild';
 import { fromRollup } from "@web/dev-server-rollup";
 
@@ -19,13 +18,6 @@ if (!env.BUTTRESS_E2E_ENDPOINT) {
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   files: '.test-bundle/*.test.js',
   plugins: [
-    importMapsPlugin({ inject: {
-      importMap: {
-        imports: {
-          'crypto': '/node_modules/false-file.js',
-        }
-      }
-    }}),
     replace({
       "BUILD_REPLACE_TESTE2E_WITH_ENDPOINT": env.BUTTRESS_E2E_ENDPOINT,
       "BUILD_REPLACE_TESTE2E_WITH_APP_TOKEN": env.BUTTRESS_E2E_APP_TOKEN,
