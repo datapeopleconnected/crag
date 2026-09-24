@@ -164,7 +164,7 @@ any time.
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
 | `delete(path, opts?)`                         | Deletes an entity: `delete('organisation.<id>')`. Returns whether it was in the store.                                                             |
-| `nextIdle(schema)`                            | Resolves once that schema has no queued requests. It doesn't wait for a request that's already been sent; use `dboComplete` for that. |
+| `nextIdle(schema)`                            | Resolves once that schema has no requests queued or waiting for a response from Buttress. It also waits for requests queued in the meantime. |
 
 Before you write:
 

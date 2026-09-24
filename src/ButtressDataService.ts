@@ -632,7 +632,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private __updateQueue(): undefined {
     if (this._requestQueue.length === 0) {
-      this.__awaitIdleQueue.forEach((resolve) => resolve(true));
+      const waiting = this.__awaitIdleQueue;
+      this.__awaitIdleQueue = [];
+      waiting.forEach((resolve) => resolve(true));
       return;
     }
     if (this.status === 'working') return;
@@ -643,7 +645,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async nextIdle(): Promise<boolean> {
     return new Promise((r) => {
       queueMicrotask(() => {
-        if (this._requestQueue.length === 0) {
+        if (this._requestQueue.length === 0 && this.status !== 'working') {
           r(true);
           return;
         }
@@ -776,8 +778,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
           contentType: 'application/json',
           body: null,
           dependentRequests: requests,
-          resolve: request.resolve,
-          reject: request.reject,
+          // Every bundled request settles with the bulk request.
+          resolve: requests.map((rq) => rq.resolve),
+          reject: requests.map((rq) => rq.reject),
         };
 
         if (request.type === 'bulk/update') {
@@ -785,9 +788,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
             id: rq.entityId,
             body: rq.body,
           }));
-
-          request.resolve = requests.map((rq) => rq.resolve);
-          request.reject = requests.map((rq) => rq.reject);
         } else {
           request.body = requests.map((rq) => rq.body);
         }
@@ -820,8 +820,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
         );
       }
 
-      this.status = 'done';
+      // Still working until the body is read, so nextIdle() doesn't resolve before this request does.
       const data = await response.json();
+      this.status = 'done';
       if (request.resolve && !Array.isArray(request.resolve)) request.resolve(data);
       if (request.resolve && Array.isArray(request.resolve)) request.resolve.forEach((rq: any) => rq(data));
     } catch (err) {

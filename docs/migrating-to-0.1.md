@@ -251,6 +251,11 @@ realtime updates whose `data.clientSessionId` matches.
 - **Missing entities are fetched once.** When a realtime update arrives for an entity that isn't in the store, crag
   fetches it. Previously a handler for this was added every time the element connected and never removed, so after the
   element had been attached N times, each of these updates caused N fetches.
+- **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
+  request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
+  Buttress has responded to every request, including any queued while it waits.
+- **Every create in a bulk add settles.** When several creates were combined into one bulk request, only the first
+  one's `dboComplete` was resolved or rejected. The others never settled.
 - **Invalid `loglevel` values are ignored.** Previously, a value from `0` to `4` was turned into a level name and that
   name used as the level, which quietly turned off everything except errors.
 
