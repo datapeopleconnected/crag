@@ -371,3 +371,60 @@ describe('ButtressDbService awaitConnection', () => {
     expect(await outcomeOf(waiting)).to.equal('resolved');
   });
 });
+
+describe('ButtressDbService schema names', () => {
+  let originalFetch: typeof window.fetch;
+
+  const schemas = [
+    { name: 'users', type: 'collection', core: true, properties: {} },
+    { name: 'activities', type: 'collection', core: true, properties: {} },
+    { name: 'access', type: 'collection', core: true, properties: {} },
+    { name: 'items', type: 'collection', properties: {} },
+  ];
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    window.fetch = async () => new Response(JSON.stringify(schemas));
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const connected = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    return el;
+  };
+
+  it('uses the same local name for the schema and its data service', async () => {
+    const el = await connected();
+
+    for (const name of ['user', 'activity', 'acces', 'items']) {
+      expect(el.getSchema(name), name).to.not.equal(false);
+      expect(Boolean((el as any)._dataServices[name]), name).to.equal(true);
+    }
+    expect(Object.keys((el as any)._dataServices)).to.have.length(4);
+  });
+
+  it('routes a core schema whose name ends in ies', async () => {
+    const el = await connected();
+
+    expect((el as any)._dataServices.activity.getUrl()).to.equal('https://example.test/api/v1/activity/');
+  });
+
+  it('finds the local name for the name Buttress sends', async () => {
+    const el = await connected();
+    const { localName } = (el as any)._dsStoreInterface;
+
+    expect(['users', 'activities', 'items', 'unknown'].map(localName)).to.deep.equal([
+      'user',
+      'activity',
+      'items',
+      undefined,
+    ]);
+  });
+});

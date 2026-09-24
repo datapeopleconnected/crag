@@ -201,4 +201,45 @@ describe('ButtressRealtime', () => {
       expect(applied.length).to.equal(1);
     });
   });
+
+  describe('schema names', () => {
+    const setup = () => {
+      const created: unknown[][] = [];
+      const store = {
+        localName: (name: string) => ({ users: 'user' })[name],
+        get: () => undefined,
+        create: (...args: unknown[]) => created.push(args),
+      };
+      const realtime = new ButtressRealtime(
+        store as any,
+        buildSettings({}),
+        () => {},
+        () => {},
+      );
+      const post = (schemaName: string) =>
+        (realtime as any)._parsePayload({
+          schemaName,
+          verb: 'post',
+          path: 'user',
+          pathSpec: 'user',
+          response: { id: 'u1' },
+        });
+      return { created, post };
+    };
+
+    it('applies updates to a core schema under its local name', () => {
+      const { created, post } = setup();
+
+      post('users');
+
+      expect(created).to.deep.equal([['user', { id: 'u1' }, { localOnly: true }]]);
+    });
+
+    it('skips updates for a schema it has not loaded', () => {
+      const { created, post } = setup();
+
+      expect(() => post('unknown')).to.not.throw();
+      expect(created).to.deep.equal([]);
+    });
+  });
 });

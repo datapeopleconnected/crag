@@ -173,7 +173,13 @@ export default class ButtressDataRealtime {
     //   response.__readonly__ = true;
     // }
 
-    const schemaName = data.schemaName;
+    // Buttress sends a core schema's own name (users), which crag stores under its local name (user).
+    const schemaName = this._store.localName(data.schemaName);
+    if (!schemaName) {
+      this._logger.debug(`__parsePayload: No data service for ${data.schemaName}`);
+      return;
+    }
+
     const pathSpec = data.pathSpec
       .split('/')
       .map((ps: string) => Camelize(ps, false))
@@ -189,11 +195,6 @@ export default class ButtressDataRealtime {
       if (pathParamMatches && pathParamMatches[1]) {
         params[pathParamMatches[1]] = path[idx];
       }
-    }
-
-    if (path.length > 0 && !this._store.get(`${schemaName}`)) {
-      this._logger.debug(`__parsePayload: No data service for ${schemaName}`);
-      return; // We don't have a data service for this data
     }
 
     const pathParts: PathParts = {

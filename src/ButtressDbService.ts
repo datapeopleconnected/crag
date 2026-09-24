@@ -32,10 +32,11 @@ import ButtressRealtime from './ButtressRealtime.js';
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 
-import { Settings, buildSettings } from './helpers.js';
+import { Settings, buildSettings, coreSchemaLocalName } from './helpers.js';
 
 export interface customButtressStoreInterface extends ButtressStoreInterface {
   clearQueryMaps: () => void;
+  localName: (schemaName: string) => string | undefined;
 }
 
 export interface EventDataDataServiceLoadById {
@@ -58,6 +59,9 @@ export interface EventDataDataServiceLoadById {
  * whenever the socket connects (`true`) or disconnects (`false`).
  * @fires {CustomEvent<EventDataDataServiceLoadById>} dataservice:loadById - When a realtime update arrives for an
  * entity that isn't in the store. The element fetches the entity itself; the event is for information.
+ * @fires {CustomEvent} bjs-resync - When the realtime socket connects again after losing its connection, or after the
+ * element was moved in the DOM. Updates sent in the meantime are lost, so cached queries have been cleared: query
+ * again to reload what you're showing.
  */
 export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
@@ -147,6 +151,8 @@ export class ButtressDbService extends LitElement {
       notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): boolean =>
         this._getDataService(path).notifyPath(path, value, opts),
       clearQueryMaps: () => Object.values(this._dataServices).forEach((ds) => ds.clearQueryMap()),
+      localName: (schemaName: string) =>
+        Object.keys(this._schema || {}).find((name) => this._schema?.[name].name === schemaName),
     };
 
     // Store
@@ -297,8 +303,7 @@ export class ButtressDbService extends LitElement {
     if (response.ok) {
       const body = await response.json();
       this._schema = body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
-        const schemaName = schema.core ? this._stripTrailingS(schema.name) : schema.name;
-        obj[schemaName] = schema;
+        obj[schema.core ? coreSchemaLocalName(schema.name) : schema.name] = schema;
         return obj;
       }, {});
       this._logger.debug(body);
@@ -314,24 +319,22 @@ export class ButtressDbService extends LitElement {
     const dataServices: string[] = Object.keys(this._dataServices || []);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
+    // _schema is keyed by local name, which also names the data service.
     schemas.forEach((name) => {
       if (!this._schema) return;
       const schema = this._schema[name];
-      // TODO change apps and users api to app and user to be consistent with the endpoints
-      const endpointName = schema.core ? this._stripTrailingS(name) : schema.name;
-      if (dataServices.includes(endpointName)) {
-        this._dataServices[endpointName].updateSchema(this._schema[name]);
+      if (dataServices.includes(name)) {
+        this._dataServices[name].updateSchema(schema);
       } else {
-        const isCore = schema.core === true;
-        this._dataServices[endpointName] = new ButtressDataService(
-          endpointName,
-          isCore,
+        this._dataServices[name] = new ButtressDataService(
+          name,
+          schema.core === true,
           this._settings,
           this._store,
-          this._schema[name],
+          schema,
         );
         if (this._settings.logLevel) {
-          this._dataServices[endpointName].setLogLevel(this._settings.logLevel);
+          this._dataServices[name].setLogLevel(this._settings.logLevel);
         }
       }
     });
@@ -497,16 +500,6 @@ export class ButtressDbService extends LitElement {
     if (changedProperties.has('userId')) this._settings.userId = this.userId;
     if (changedProperties.has('coreSchema')) this._settings.coreSchema = this.coreSchema;
     // Trigger reconnection?
-  }
-
-  _stripTrailingS(word: string): string {
-    const lastLetter = word.slice(-1);
-    let output = word;
-    if (lastLetter === 's') {
-      output = word.substring(0, word.length - 1);
-    }
-
-    return output;
   }
 
   async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {

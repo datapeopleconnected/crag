@@ -121,7 +121,7 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `token`       | `token`      | Token sent with every request and used to open the realtime socket. Required.                                                                               |
 | `api-path`    | `apiPath`    | Your app's API path on the server. Required.                                                                                                                |
 | `userid`      | `userId`     | Id of the signed-in user, returned by `getUserId()`. crag doesn't use it itself. |
-| `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names lose a trailing `s`: `users` becomes `user`.              |
+| `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names are singular: `users` becomes `user`, and `activities` becomes `activity`. |
 | `loglevel`    | `logLevel`   | `error`, `warn`, `info` (the default), `debug` or `sys`. Applies to the element, the store, the data services and the realtime connection.                  |
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
 | `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |

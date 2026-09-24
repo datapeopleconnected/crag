@@ -257,6 +257,10 @@ realtime updates whose `data.clientSessionId` matches.
 - **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
   connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
   reload what you're showing. Entities already in the store keep their values until a query fetches them again.
+- **Realtime updates reach core schemas.** Buttress names core schemas in the plural (`users`), and crag uses the
+  singular locally (`user`). Realtime updates carry the plural name, so crag couldn't find the schema and dropped
+  them. It now finds it. The local names don't change, except that `activities` is now `activity` rather than
+  `activitie`, which Buttress had no route for.
 - **`awaitConnection()` rejects when `connect()` fails.** It used to wait until a later `connect()` succeeded, or
   forever if none did. It now rejects with the same error, so catch it where you await it.
 - **`$exists` matches on whether the property is there.** Locally it used to be the same test as `$eq`, so

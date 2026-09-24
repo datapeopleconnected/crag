@@ -41,6 +41,14 @@ export function buildSettings(settings: Partial<Settings>): Settings {
   };
 }
 
+// Buttress names most core schemas in the plural (users, activities) but routes them in the singular (user,
+// activity), and crag uses the singular name locally.
+export function coreSchemaLocalName(name: string): string {
+  if (name.endsWith('ies')) return `${name.slice(0, -3)}y`;
+  if (name.endsWith('s')) return name.slice(0, -1);
+  return name;
+}
+
 export function Camelize(str: string, upper?: boolean): string {
   return str
     .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => (index === 0 && !upper ? word.toLowerCase() : word.toUpperCase()))
