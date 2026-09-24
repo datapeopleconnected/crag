@@ -325,7 +325,8 @@ export default class ButtressDataRealtime {
         );
         continue;
       }
-      this._store.set(`${schemaName}.${responses[x].id}`, responses[x], {
+      // Through create() so the data service knows its cached pages may be missing it.
+      this._store.create(schemaName, responses[x], {
         localOnly: true,
       });
     }

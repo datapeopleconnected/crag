@@ -167,6 +167,7 @@ describe('ButtressDataService query', () => {
   let originalFetch: typeof window.fetch;
   let server: Org[];
   let searches: number;
+  let holdSearches: Promise<void> | undefined;
 
   // Pretends to be Buttress: answers searches (with $eq, sort, skip and limit) and counts from `server`.
   const matches = (org: Org, query: Record<string, { $eq: string }>) =>
@@ -176,6 +177,7 @@ describe('ButtressDataService query', () => {
     originalFetch = window.fetch;
     Logger.disableLogging = true;
     searches = 0;
+    holdSearches = undefined;
     server = Array.from({ length: 25 }, (_, i) => ({
       id: `id${String(i + 1).padStart(2, '0')}`,
       name: `A${String(i + 1).padStart(2, '0')}`,
@@ -189,8 +191,13 @@ describe('ButtressDataService query', () => {
       if (init?.method === 'SEARCH' && url.pathname.endsWith('/organisation/count')) {
         return new Response(JSON.stringify(server.filter((o) => matches(o, body.query)).length));
       }
+      if (init?.method === 'POST' && url.pathname.endsWith('/organisation/')) {
+        server.push(body);
+        return new Response(JSON.stringify(body));
+      }
       if (init?.method === 'SEARCH') {
         searches += 1;
+        await holdSearches;
         let found = server.filter((o) => matches(o, body.query));
         if (body.sort?.name) found = found.sort((a, b) => (a.name < b.name ? -body.sort.name : body.sort.name));
         found = found.slice(body.skip, body.limit ? body.skip + body.limit : undefined);
@@ -298,6 +305,59 @@ describe('ButtressDataService query', () => {
     await ds.query(active, { limit: 10, skip: 0, sort: byName });
 
     expect(searches).to.equal(2);
+  });
+
+  it('searches for a cached page again after a create', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    ds.create({ id: 'id00', name: 'A00', status: 'active' });
+    await flush();
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(searches).to.equal(2);
+    expect(names(results)).to.deep.equal(['A00', ...range(1, 9)]);
+  });
+
+  it('searches for a cached page again after a create from elsewhere', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    // How ButtressRealtime adds an entity another client created.
+    ds.create({ id: 'id00', name: 'A00', status: 'active' }, { localOnly: true });
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(searches).to.equal(2);
+  });
+
+  it('does not cache a page whose search was sent before a create', async () => {
+    const ds = dataService();
+    let release!: () => void;
+    holdSearches = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    const loading = ds.query(active, { limit: 10, skip: 0, sort: byName });
+    await flush();
+    ds.create({ id: 'id00', name: 'A00', status: 'active' });
+    release();
+    await loading;
+    await flush();
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(searches).to.equal(2);
+    expect(names(results)).to.deep.equal(['A00', ...range(1, 9)]);
+  });
+
+  it('keeps cached unpaged queries after a create', async () => {
+    const ds = dataService();
+    await ds.query(active, { sort: byName });
+
+    ds.create({ id: 'id00', name: 'A00', status: 'active' });
+    await flush();
+    await ds.query(active, { sort: byName });
+
+    expect(searches).to.equal(1);
   });
 
   it('includes local changes in an unpaged query', async () => {

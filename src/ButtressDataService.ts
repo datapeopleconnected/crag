@@ -71,7 +71,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private _settings: Settings;
 
   // The ids each search returned, in the server's order, keyed by __queryKey().
-  private _queryCache: Map<string, string[]> = new Map();
+  private _queryCache: Map<string, { ids: string[]; paged: boolean; generation: number }> = new Map();
+
+  // Bumped by a create: cached pages from an earlier generation are searched for again.
+  private __pageGeneration = 0;
 
   private _requestQueue: Array<any> = [];
 
@@ -123,7 +126,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
       throw new Error('Unable to create entity with duplicate id');
     }
 
-    return this._store.create(this.name, value, opts);
+    const path = this._store.create(this.name, value, opts);
+    // Only Buttress can say which page a new entity belongs on.
+    this.__pageGeneration += 1;
+
+    return path;
   }
 
   delete(id: string, opts?: NotifyChangeOpts) {
@@ -365,7 +372,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
-    const paged = opts?.limit || opts?.skip;
+    const paged = ButtressDataService.__isPaged(opts);
     const results = paged ? this.__cachedPage(buttressQuery, opts) : this.__filterLocalData(buttressQuery, opts?.sort);
 
     return { skip: opts?.skip, limit: opts?.limit, total, results };
@@ -374,7 +381,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // A page can't be cut from the store, which may hold matches the server left off it, so a
   // page is the entities the server sent, less any since deleted or changed so they don't match.
   private __cachedPage(buttressQuery: any, opts?: QueryOpts): ButtressEntity[] {
-    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts)) || [];
+    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts))?.ids || [];
     const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
     // _processQueryPart can reorder the entities ($or does), so keep the server's order.
     const matching = new Set(this.__matchLocally(buttressQuery, entities));
@@ -399,6 +406,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
       this._logger.error('Query was:', buttressQuery);
       throw err;
     }
+  }
+
+  private static __isPaged(opts?: QueryOpts): boolean {
+    return !!(opts?.limit || opts?.skip);
   }
 
   private __queryKey(buttressQuery: any, opts?: QueryOpts): string {
@@ -566,7 +577,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     if (!this._settings) return undefined;
 
     const key = this.__queryKey(buttressQuery, opts);
-    if (!opts?.bust && this._queryCache.has(key)) {
+    const paged = ButtressDataService.__isPaged(opts);
+    const generation = this.__pageGeneration;
+    const cached = this._queryCache.get(key);
+    if (!opts?.bust && cached && (!cached.paged || cached.generation === generation)) {
       return false;
     }
 
@@ -599,10 +613,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
       silent: true,
     });
-    this._queryCache.set(
-      key,
-      newMapArrMap.map(([id]) => id),
-    );
+    // The generation from when the search was sent, so a create while it was out makes this page stale.
+    this._queryCache.set(key, { ids: newMapArrMap.map(([id]) => id), paged, generation });
 
     return body;
   }

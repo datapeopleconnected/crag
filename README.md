@@ -267,7 +267,10 @@ it then chooses `results` depends on whether you ask for a page, with `limit` or
 
 **With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
 When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
-longer match, so a page can come back shorter than `limit`. New matches don't appear until you pass `bust: true`.
+longer match, so a page can come back shorter than `limit`. Once an entity has been created in that schema, by you or
+by another client, the next call for a page searches again, because only Buttress knows which page the new entity
+belongs on. A search sent in the same tick as a `create()` can reach Buttress before the new entity does. Entities
+Buttress has that crag hasn't heard about appear once you pass `bust: true`.
 
 Either way:
 

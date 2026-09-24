@@ -257,7 +257,8 @@ realtime updates whose `data.clientSessionId` matches.
 - **Paged queries return the page Buttress sent.** A query with `limit` or `skip` used to be run again over
   everything in the store and then cut to size, so the page depended on what else was loaded: opening straight on
   page 2 returned nothing. It now returns the entities Buttress sent for that page, less any since deleted or changed
-  so they no longer match. Entities created since then appear once you pass `bust: true`.
+  so they no longer match. After a create in that schema, whether yours or another client's, pages are searched for
+again.
 - **Every create in a bulk add settles.** When several creates were combined into one bulk request, only the first
   one's `dboComplete` was resolved or rejected. The others never settled.
 - **Invalid `loglevel` values are ignored.** Previously, a value from `0` to `4` was turned into a level name and that

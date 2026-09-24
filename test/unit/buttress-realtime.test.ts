@@ -76,4 +76,22 @@ describe('ButtressRealtime', () => {
 
     expect(() => realtime.disconnect()).to.not.throw();
   });
+
+  it('creates entities that are new to the store', () => {
+    const created: unknown[][] = [];
+    const store = {
+      get: () => undefined,
+      create: (...args: unknown[]) => created.push(args),
+    };
+    const realtime = new ButtressRealtime(
+      store as any,
+      buildSettings({}),
+      () => {},
+      () => {},
+    );
+
+    (realtime as any)._handlePost('organisation', { id: 'org1', name: 'New' });
+
+    expect(created).to.deep.equal([['organisation', { id: 'org1', name: 'New' }, { localOnly: true }]]);
+  });
 });
