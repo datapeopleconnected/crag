@@ -257,6 +257,15 @@ realtime updates whose `data.clientSessionId` matches.
 - **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
   connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
   reload what you're showing. Entities already in the store keep their values until a query fetches them again.
+- **`core-schema` loads the core schemas again.** Since a change in August 2023, crag sent the list as a request
+  header, which Buttress ignores, so no core schemas were loaded. It's now sent in the query string, where
+  Buttress reads it. If you set `core-schema`, check that the token can read those schemas.
+- **App administration methods send `apiPath`.** For the same reason, the `apiPath` you passed went in a header, so Buttress
+  never received it. It's now sent in the query string.
+- **Errors from Buttress are `ButtressError`s.** They carry `status`, `method`, `url` and `serverMessage`, and their
+  messages have changed: code that matched on text such as `DS ERROR [add]` or `Buttress Error: 500` needs to check
+  `status` instead. The app administration methods also no longer wrap errors twice ("Error: Error: …"), and they
+  accept any 2xx response, not only `200`.
 - **Realtime updates reach core schemas.** Buttress names core schemas in the plural (`users`), and crag uses the
   singular locally (`user`). Realtime updates carry the plural name, so crag couldn't find the schema and dropped
   them. It now finds it. The local names don't change, except that `activities` is now `activity` rather than

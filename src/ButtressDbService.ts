@@ -28,6 +28,7 @@ import {
   CRCallback,
 } from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
+import { ButtressClient } from './ButtressClient.js';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
@@ -104,6 +105,8 @@ export class ButtressDbService extends LitElement {
 
   private _settings: Settings;
 
+  private _client: ButtressClient;
+
   private _schema: { [key: string]: ButtressSchema } | null = null;
 
   private _dataServices: { [key: string]: ButtressDataService } = {};
@@ -121,6 +124,7 @@ export class ButtressDbService extends LitElement {
     super();
 
     this._settings = buildSettings({});
+    this._client = new ButtressClient(this._settings);
 
     const dispatchCustomEvent = (type: string, init: CustomEventInit) =>
       this.dispatchEvent(new CustomEvent(type, init));
@@ -268,48 +272,19 @@ export class ButtressDbService extends LitElement {
     waiting.forEach(({ resolve, reject }) => (failure ? reject(failure.err) : resolve()));
   }
 
-  private _bjsRequest(
-    method: string,
-    path: string,
-    token: string,
-    body?: any,
-    headers?: { [key: string]: string },
-    queryString?: any,
-  ) {
-    const qs = new URLSearchParams({ urq: Date.now(), ...queryString });
-
-    return fetch(`${path}?${qs.toString()}`, {
-      method,
-      cache: 'no-store',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...headers,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  }
-
   private async _fetchAppSchema() {
     this._logger.debug('_fetchAppSchema', this._settings);
     if (!this._settings) return;
 
-    const token = this._settings.token || '';
-    const coreSchema: string[] = this._settings.coreSchema ? this._settings.coreSchema : [];
-
-    const response = await this._bjsRequest('GET', `${this._settings.endpoint}/api/v1/app/schema`, token, null, {
-      core: coreSchema.join(','),
+    const coreSchema = this._settings.coreSchema || [];
+    const body = await this._client.request<ButtressSchema[]>('GET', `${this._settings.endpoint}/api/v1/app/schema`, {
+      query: coreSchema.length > 0 ? { core: coreSchema.join(',') } : {},
     });
-    if (response.ok) {
-      const body = await response.json();
-      this._schema = body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
-        obj[schema.core ? coreSchemaLocalName(schema.name) : schema.name] = schema;
-        return obj;
-      }, {});
-      this._logger.debug(body);
-    } else {
-      throw new Error(`Buttress Error: ${response.status}: ${response.statusText}`);
-    }
+    this._schema = body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
+      obj[schema.core ? coreSchemaLocalName(schema.name) : schema.name] = schema;
+      return obj;
+    }, {});
+    this._logger.debug(body);
   }
 
   private async _refreshLocalDataServices() {
@@ -502,152 +477,44 @@ export class ButtressDbService extends LitElement {
     // Trigger reconnection?
   }
 
+  // Admin requests. Each goes to another app's API path, which Buttress reads from the query string.
+  private _adminRequest<T = any>(method: string, path: string, apiPath: string, body?: unknown): Promise<T> {
+    if (!this._settings.endpoint) throw new Error(`Missing setting 'endpoint' while sending ${method} ${path}`);
+
+    return this._client.request<T>(method, `${this._settings.endpoint}/api/v1/${path}`, { body, query: { apiPath } });
+  }
+
   async addLambda(lambda: ButtressEntity, auth: any, apiPath: string) {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest(
-        'POST',
-        `${endpoint}/api/v1/lambda`,
-        token,
-        {
-          lambda,
-          auth,
-        },
-        { apiPath },
-      );
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return true;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    await this._adminRequest('POST', 'lambda', apiPath, { lambda, auth });
+    return true;
   }
 
   async deployLambda(lambda: ButtressEntity, apiPath: string) {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest(
-        'PUT',
-        `${endpoint}/api/v1/lambda/${lambda.id}/deployment`,
-        token,
-        {
-          branch: lambda.git.branch,
-          hash: lambda.git.hash,
-        },
-        { apiPath },
-      );
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return true;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    await this._adminRequest('PUT', `lambda/${lambda.id}/deployment`, apiPath, {
+      branch: lambda.git.branch,
+      hash: lambda.git.hash,
+    });
+    return true;
   }
 
   async addDataSharing(appDataSharing: ButtressEntity, apiPath: string) {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest('POST', `${endpoint}/api/v1/app-data-sharing`, token, appDataSharing, {
-        apiPath,
-      });
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return outcome.remoteAppToken;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    const outcome = await this._adminRequest('POST', 'app-data-sharing', apiPath, appDataSharing);
+    return outcome.remoteAppToken;
   }
 
   async addSchema(apiPath: string, schema: any) {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest('PUT', `${endpoint}/api/v1/app/schema`, token, schema, { apiPath });
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return true;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    await this._adminRequest('PUT', 'app/schema', apiPath, schema);
+    return true;
   }
 
   async updateAppPolicySelectors(apiPath: string, policySelectorsList: any) {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest(
-        'PUT',
-        `${endpoint}/api/v1/app/policy-property-list`,
-        token,
-        policySelectorsList,
-        { apiPath },
-      );
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return true;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    await this._adminRequest('PUT', 'app/policy-property-list', apiPath, policySelectorsList);
+    return true;
   }
 
   async activateDataSharing(dataSharingId: string, apiPath: string, remoteToken: string): Promise<boolean> {
-    const { endpoint, token } = this._settings;
-
-    try {
-      if (!endpoint || !token) {
-        throw new Error('Invalid Buttress endpoint or a token');
-      }
-
-      const res = await this._bjsRequest(
-        'PUT',
-        `${endpoint}/api/v1/app-data-sharing/${dataSharingId}/token`,
-        token,
-        {
-          token: remoteToken,
-        },
-        { apiPath },
-      );
-
-      const outcome = await res.json();
-      if (res.status !== 200) throw new Error(outcome.message);
-
-      return true;
-    } catch (err: any) {
-      throw new Error(err);
-    }
+    await this._adminRequest('PUT', `app-data-sharing/${dataSharingId}/token`, apiPath, { token: remoteToken });
+    return true;
   }
 
   render(): TemplateResult {

@@ -21,6 +21,7 @@ import { consume } from '@lit/context';
 import '../../src/components/buttress-db-service.js';
 import { ButtressDbService } from '../../src/ButtressDbService.js';
 import { buttressDbServiceContext } from '../../src/context.js';
+import { ButtressError } from '../../src/ButtressClient.js';
 
 class DbConsumer extends LitElement {
   @consume({ context: buttressDbServiceContext })
@@ -426,5 +427,65 @@ describe('ButtressDbService schema names', () => {
       'items',
       undefined,
     ]);
+  });
+});
+
+describe('ButtressDbService requests', () => {
+  let originalFetch: typeof window.fetch;
+  let sent: { url: URL; init: RequestInit }[];
+  let respond: () => Response;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    sent = [];
+    respond = () => new Response('[]');
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: new URL(input.toString()), init: init! });
+      return respond();
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const element = () =>
+    fixture<ButtressDbService>(html`
+      <buttress-db-service
+        endpoint="https://example.test"
+        token="abc"
+        api-path="app"
+        core-schema='["users"]'
+      ></buttress-db-service>
+    `);
+
+  it('asks for the core schemas in the query string', async () => {
+    const el = await element();
+    (el as any)._realtime.connect = () => {};
+
+    await el.connect();
+
+    expect(sent[0].url.searchParams.get('core')).to.equal('users');
+  });
+
+  it('sends apiPath in the query string and the session id with admin requests', async () => {
+    const el = await element();
+    respond = () => new Response('{}', { status: 201 });
+
+    expect(await el.addSchema('other-app', [])).to.equal(true);
+
+    const { url, init } = sent[0];
+    expect(url.searchParams.get('apiPath')).to.equal('other-app');
+    expect((init.headers as Record<string, string>)['x-client-session-id']).to.be.a('string');
+  });
+
+  it('rejects admin requests with the ButtressError', async () => {
+    const el = await element();
+    respond = () => new Response('{"message":"nope"}', { status: 400 });
+
+    const err = await el.addSchema('other-app', []).catch((e) => e);
+
+    expect(err).to.be.instanceOf(ButtressError);
+    expect(err.serverMessage).to.equal('nope');
   });
 });

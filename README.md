@@ -229,7 +229,7 @@ applies to later requests and doesn't reconnect.
 ### App administration
 
 These call Buttress's app-management endpoints for the app identified by `apiPath`, so the token needs permission to
-use them. Each one rejects with Buttress's error message if the request fails.
+use them. Each one rejects with a [`ButtressError`](#errors) if Buttress responds with an error.
 
 | Method                                                     | Resolves to              |
 | ---------------------------------------------------------- | ------------------------ |
@@ -239,6 +239,31 @@ use them. Each one rejects with Buttress's error message if the request fails.
 | `deployLambda(lambda, apiPath)`                            | `true`. Deploys `lambda.git.branch` at `lambda.git.hash`. |
 | `addDataSharing(appDataSharing, apiPath)`                  | The remote app's token   |
 | `activateDataSharing(dataSharingId, apiPath, remoteToken)` | `true`                   |
+
+### Errors
+
+When Buttress responds with an error status, crag rejects with a `ButtressError`. That covers `connect()`,
+`awaitConnection()`, queries, `getById()`, `count()` and the app administration methods. Writes report it through
+`dboComplete.reject`. A request that gets no response at all, for example because the network is down, rejects with
+the browser's own error instead.
+
+```ts
+import { ButtressError } from '@buttress/crag';
+
+try {
+  await db.addSchema('my-app', schema);
+} catch (err) {
+  if (err instanceof ButtressError && err.status === 403) {
+    // The token can't change this app's schema.
+  }
+}
+```
+
+| Property        | Description                                                                  |
+| --------------- | ---------------------------------------------------------------------------- |
+| `status`        | The HTTP status Buttress responded with.                                     |
+| `method`, `url` | The request, without its query string.                                       |
+| `serverMessage` | The message Buttress sent, or the status text if it didn't send one.         |
 
 ## Queries
 

@@ -20,3 +20,4 @@ export type { QueryResult } from './ButtressDataService.js';
 export type { ButtressEntity, CRCallback, CR } from './ButtressStore.js';
 export type { Settings } from './helpers.js';
 export { LogLevel } from './Logger.js';
+export { ButtressError } from './ButtressClient.js';

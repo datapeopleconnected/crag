@@ -14,6 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 import { Logger, LogLevel } from './Logger.js';
+import { ButtressClient } from './ButtressClient.js';
 
 import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
@@ -69,6 +70,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _settings: Settings;
 
+  private _client: ButtressClient;
+
   // The ids each search returned, in the server's order, keyed by __queryKey().
   private _queryCache: Map<string, { ids: string[]; paged: boolean; generation: number }> = new Map();
 
@@ -91,6 +94,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this.name = name;
     this.core = core;
     this._settings = buildSettings(settings);
+    this._client = new ButtressClient(this._settings);
 
     this.path = this.name;
 
@@ -800,34 +804,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   private async __generateRequest(request: any) {
-    const body = request.body ? JSON.stringify(request.body) : null;
     try {
-      const response = await fetch(`${request.url}?urq=${Date.now()}`, {
-        method: request.method,
-        cache: 'no-store',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this._settings.token}`,
-          'x-client-session-id': this._settings.clientSessionId || '',
-        },
-        body,
-      });
-
-      if (!response.ok) {
-        const responseData = await response.json();
-        const message = responseData ? responseData.message : '';
-        throw new Error(
-          `DS ERROR [${request.type}] ${message} - ${response.status} ${request.url} - ${response.statusText}`,
-        );
-      }
-
-      // Still working until the body is read, so nextIdle() doesn't resolve before this request does.
-      const data = await response.json();
+      const data = await this._client.request(request.method, request.url, { body: request.body });
+      // Set once the body is read, so nextIdle() doesn't resolve before this request does.
       this.status = 'done';
       if (request.resolve && !Array.isArray(request.resolve)) request.resolve(data);
       if (request.resolve && Array.isArray(request.resolve)) request.resolve.forEach((rq: any) => rq(data));
     } catch (err) {
-      // will only reject on network failure or if anything prevented the request from completing.
       this._logger.error(err);
 
       if (request.reject && !Array.isArray(request.reject)) request.reject(err);

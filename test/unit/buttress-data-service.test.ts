@@ -20,6 +20,7 @@ import ButtressDataService from '../../src/ButtressDataService.js';
 import ButtressStore, { ButtressEntity } from '../../src/ButtressStore.js';
 import ButtressSchema from '../../src/ButtressSchema.js';
 import { Logger } from '../../src/Logger.js';
+import { ButtressError } from '../../src/ButtressClient.js';
 
 const schema: ButtressSchema = {
   name: 'organisation',
@@ -123,6 +124,20 @@ describe('ButtressDataService request queue', () => {
     expect(await outcomeOf(first)).to.equal('rejected');
     expect(await outcomeOf(second)).to.equal('rejected');
     expect(await outcomeOf(third)).to.equal('rejected');
+  });
+
+  it('rejects a failed request with a ButtressError', async () => {
+    const ds = dataService();
+    console.error = () => {};
+    status = 403;
+
+    const failed = createAndTrack(ds, 'first');
+    await flush();
+    releaseFirst();
+    const err = (await failed.catch((e) => e)) as ButtressError;
+
+    expect(err).to.be.instanceOf(ButtressError);
+    expect(err.status).to.equal(403);
   });
 
   it('waits in nextIdle for a request that has already been sent', async () => {
