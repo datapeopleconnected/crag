@@ -33,7 +33,7 @@ jobs:
       - run: npm run format
       - run: npm run typecheck
       - run: npm run licence-check
-      - run: npm run test:unit
+      - run: npm run test:coverage
       - run: npm run publint
 
   e2e:

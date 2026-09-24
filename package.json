@@ -37,6 +37,7 @@
     "test:unit": "wtr --config web-test-runner.unit.config.mjs",
     "test:e2e": "node ./scripts/e2e.js wtr --node-resolve",
     "test:watch": "npm run test:unit -- --watch",
+    "test:coverage": "npm run test:unit -- --coverage",
     "publint": "publint && attw --pack . --profile esm-only",
     "prepack": "npm run build",
     "prepare": "husky",
@@ -46,7 +47,7 @@
     "format": "prettier \"**/*.ts\" --check --ignore-path .gitignore",
     "format:fix": "prettier \"**/*.ts\" --write --ignore-path .gitignore",
     "typecheck": "tsc --noEmit -p . && tsc -p test",
-    "check": "npm run lint && npm run format && npm run typecheck && npm run test:unit"
+    "check": "npm run lint && npm run format && npm run typecheck && npm run test:coverage"
   },
   "files": [
     "dist",

@@ -1,5 +1,9 @@
 # Buttress Crag
 
+[![CI](https://img.shields.io/github/actions/workflow/status/datapeopleconnected/crag/ci.yml?branch=main&label=CI)](https://github.com/datapeopleconnected/crag/actions/workflows/ci.yml?query=branch%3Amain)
+[![npm](https://img.shields.io/npm/v/@buttress/crag)](https://www.npmjs.com/package/@buttress/crag)
+[![Licence](https://img.shields.io/npm/l/@buttress/crag)](LICENSE)
+
 `@buttress/crag` connects a browser app to a Buttress server. It provides one headless web component,
 `<buttress-db-service>`, built with [Lit](https://lit.dev). The component:
 
@@ -18,8 +22,8 @@ npm install @buttress/crag
 
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
-Installing crag needs Node 24 or newer. It says so in `engines`, so npm and pnpm warn on older versions and Yarn 1
-refuses to install it.
+crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
+Node 24 or newer; see [Development](#development).
 
 ## Quick start
 

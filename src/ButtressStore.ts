@@ -186,22 +186,7 @@ export class ButtressStore implements ButtressStoreInterface {
   }
 
   pushExt(path: string, schema: ButtressSchema, opts?: NotifyChangeOpts, ...items: any[]): number {
-    let array = this.get(path);
-
-    // If we're setting a sub property of the base then we'll check the prop data type & create
-    const parts = path.split('.');
-    if (array === undefined && parts.length > 2) {
-      const prop = ButtressSchemaHelpers.getProperty(schema, parts.slice(2).join('.'));
-      if (!prop || prop.__type !== 'array') {
-        throw new Error(`Unable to call push on non-array property type: ${prop?.__type}`);
-      }
-
-      this.set(path, [], {
-        localOnly: true,
-        silent: true,
-      });
-      array = this.get(path);
-    }
+    const array = this.__getOrCreateArray(path, schema, 'push');
 
     const len = array.length;
     const ret = array.push(...items);
@@ -235,21 +220,7 @@ export class ButtressStore implements ButtressStoreInterface {
     opts?: NotifyChangeOpts,
     ...items: any[]
   ): any[] {
-    let array = this.get(path);
-
-    const parts = path.split('.');
-    if (array === undefined && parts.length > 2) {
-      const prop = ButtressSchemaHelpers.getProperty(schema, parts.slice(2).join('.'));
-      if (!prop || prop.__type !== 'array') {
-        throw new Error(`Unable to call push on non-array property type: ${prop?.__type}`);
-      }
-
-      this.set(path, [], {
-        localOnly: true,
-        silent: true,
-      });
-      array = this.get(path);
-    }
+    const array = this.__getOrCreateArray(path, schema, 'splice');
 
     let beginning = start;
 
@@ -259,7 +230,11 @@ export class ButtressStore implements ButtressStoreInterface {
       beginning = Math.floor(beginning);
     }
 
-    const ret = arguments.length === 3 ? array.splice(beginning) : array.splice(beginning, deleteCount, ...items);
+    // splice() and its wrappers pass deleteCount on even if omitted, so undefined with no items removes to the end
+    const ret =
+      deleteCount === undefined && !items.length
+        ? array.splice(beginning)
+        : array.splice(beginning, deleteCount, ...items);
     if (items.length || ret.length) {
       this.__notifySplices(array, path, [
         {
@@ -274,6 +249,31 @@ export class ButtressStore implements ButtressStoreInterface {
     }
 
     return ret;
+  }
+
+  private __getOrCreateArray(path: string, schema: ButtressSchema, method: 'push' | 'splice') {
+    let array = this.get(path);
+
+    // If we're setting a sub property of the base then we'll check the prop data type & create
+    const parts = path.split('.');
+    if (array === undefined && parts.length > 2) {
+      const prop = ButtressSchemaHelpers.getProperty(schema, parts.slice(2).join('.'));
+      if (!prop || prop.__type !== 'array') {
+        throw new Error(`Unable to call ${method} on non-array property type: ${prop?.__type}`);
+      }
+
+      // set() stores nothing, and returns undefined, when an object on the way to the array is missing
+      const setPath = this.set(path, [], {
+        localOnly: true,
+        silent: true,
+      });
+      if (!setPath) {
+        throw new Error(`Unable to call ${method} on ${path}: ${parts.slice(0, -1).join('.')} is not in the store`);
+      }
+      array = this.get(path);
+    }
+
+    return array;
   }
 
   private __notifySplices(array: Array<any>, path: string, splices: Array<any>) {

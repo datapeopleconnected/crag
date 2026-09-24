@@ -7,6 +7,15 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   // Served straight from source: esbuild strips the types and maps the `.js`
   // imports onto their `.ts` files, so no build step is needed first.
   files: 'test/unit/**/*.test.ts',
+
+  /**
+   * Used when run with --coverage (npm run test:coverage). The run fails if coverage drops below these
+   * floors, which sit just under the current figures: raise them as coverage improves.
+   */
+  coverageConfig: {
+    include: ['src/**/*.ts'],
+    threshold: { statements: 50, branches: 75, functions: 35, lines: 50 },
+  },
   plugins: [
     importMapsPlugin({ inject: {
       importMap: {

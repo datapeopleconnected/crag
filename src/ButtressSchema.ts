@@ -41,7 +41,8 @@ export class ButtressSchemaHelpers {
       if (!property) {
         return null;
       }
-      if (property.type && property.type === 'array' && !property.__schema) {
+      // Only a nested object (no __type) or a property with a __schema has properties to build an object from.
+      if (property.__type && !property.__schema) {
         return null;
       }
 
@@ -85,6 +86,7 @@ export class ButtressSchemaHelpers {
 
     let flattened = {};
     const path: string[] = [];
+    // __ keys aren't skipped here: at the top level they're property names, like the core apps schema's __roles.
     Object.keys(schema.properties).forEach((prop: string) => {
       flattened = Object.assign(flattened, __buildFlattenedSchema(prop, schema.properties, path, flattened));
     });

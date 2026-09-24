@@ -31,9 +31,6 @@ npm install @buttress/crag@^0.1.0 @lit/context lit@^3
   keep it, the page will load both Lit 2 and Lit 3, because ltn-element requires Lit 2.
 - Check that there's one copy of Lit with `npm ls lit`. More than one copy causes a "Multiple versions of Lit loaded"
   warning in development.
-- crag 0.1 needs Node 24 or newer to install, and says so in `engines`. On older versions npm and pnpm warn, and
-  Yarn 1 refuses to install it. crag runs in the browser, so this only affects the machines that install and build
-  your app.
 
 ## 2. Put your components inside `<buttress-db-service>`
 
