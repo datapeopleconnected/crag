@@ -23,10 +23,15 @@ export default /** @type {import('@web/dev-server').DevServerConfig} */ ({
   plugins: [
     // socket.io-parser >=4.2.7 maps the 'development' condition above to a debug build that imports
     // the CommonJS `debug` package, which browsers can't load. Same override as the unit test config.
+    // bson tries `import('crypto')` and falls back to the browser's crypto when it fails. Without this, the dev
+    // server can't resolve the import and serves bson as a 500. Same override as the unit test config.
     importMapsPlugin({
       inject: {
         importMap: {
-          imports: { 'socket.io-parser': '/node_modules/socket.io-parser/build/esm/index.js' },
+          imports: {
+            crypto: '/node_modules/false-file.js',
+            'socket.io-parser': '/node_modules/socket.io-parser/build/esm/index.js',
+          },
         },
       },
     }),

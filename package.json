@@ -21,15 +21,18 @@
       "types": "./dist/components/buttress-db-service.d.ts",
       "default": "./dist/components/buttress-db-service.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./custom-elements.json": "./custom-elements.json"
   },
+  "customElements": "custom-elements.json",
   "sideEffects": [
     "./dist/components/*.js"
   ],
   "scripts": {
-    "clean": "rimraf dist .test-bundle tsconfig.tsbuildinfo",
+    "clean": "rimraf dist .test-bundle tsconfig.tsbuildinfo custom-elements.json",
     "start": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds\"",
-    "build": "rimraf dist tsconfig.tsbuildinfo && tsc --build --pretty",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc --build --pretty && npm run analyze",
+    "analyze": "cem analyze --litelement",
     "roll": "rimraf .test-bundle && rollup -c rollup.config.mjs",
     "watch": "tsc --watch --preserveWatchOutput",
     "licence-check": "./.husky/licence-check",
@@ -52,6 +55,7 @@
   "files": [
     "dist",
     "src",
+    "custom-elements.json",
     "LICENSE",
     "COPYING"
   ],
@@ -64,6 +68,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@custom-elements-manifest/analyzer": "^0.11.0",
     "@open-wc/eslint-config": "^13.1.0",
     "@open-wc/testing": "^4.0.0",
     "@rollup/plugin-node-resolve": "^15.3.0",

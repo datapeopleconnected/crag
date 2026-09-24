@@ -43,6 +43,22 @@ export interface EventDataDataServiceLoadById {
   id: string;
 }
 
+/**
+ * Connects the page to a Buttress server, keeps a local store of the entities you load, and provides itself to the
+ * elements inside it through `buttressDbServiceContext`.
+ *
+ * @tagname buttress-db-service
+ *
+ * @slot - Content that uses the service. The element takes up no space in the layout (`display: contents`).
+ *
+ * @attr log-label - Label for the element's own log lines. Defaults to the tag name.
+ * @attr log-disable - Turns off the element's own log lines. Errors are still printed.
+ *
+ * @fires {CustomEvent<boolean>} bjs-connection-changed - With `true` when `connect()` opens the realtime socket, then
+ * whenever the socket connects (`true`) or disconnects (`false`).
+ * @fires {CustomEvent<EventDataDataServiceLoadById>} dataservice:loadById - When a realtime update arrives for an
+ * entity that isn't in the store. The element fetches the entity itself; the event is for information.
+ */
 export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
 
@@ -64,13 +80,13 @@ export class ButtressDbService extends LitElement {
   @property({ type: String, attribute: 'api-path' })
   apiPath?: string;
 
-  @property({ type: String })
+  @property({ type: String, attribute: 'userid' })
   userId?: string;
 
   @property({ type: Array, attribute: 'core-schema' })
   coreSchema?: Array<string>;
 
-  @property({ type: String })
+  @property({ type: String, attribute: 'loglevel' })
   logLevel: string = 'info';
 
   private _logger: Logger = new Logger(this.tagName.toLowerCase());
