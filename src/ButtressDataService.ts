@@ -13,7 +13,7 @@
  * You should have received a copy of the GNU Affero General Public Licence along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import { LtnLogger, LtnLogLevel } from '@lighten/ltn-element';
+import { Logger, LogLevel } from './Logger.js';
 import { ObjectId } from 'bson';
 
 import ButtressSchema from './ButtressSchema.js';
@@ -54,7 +54,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   
   private __route: string;
 
-  private _logger: LtnLogger;
+  private _logger: Logger;
 
   readonly BUNDLED_REQUESTS_TYPES: string[] = ['add', 'update'];
 
@@ -87,7 +87,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     this.__route = this.path.split('-').map((part) => Dasherize(part)).join('/');
 
-    this._logger = new LtnLogger(`buttress-data-service-${name}`);
+    this._logger = new Logger(`buttress-data-service-${name}`);
 
     this._schema = schema;
 
@@ -98,7 +98,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._store.subscribe(`${this.name}.*, ${this.name}`, (cr: any) => this._processDataChange(cr));
   }
 
-  setLogLevel(level: LtnLogLevel) {
+  setLogLevel(level: LogLevel) {
     this._logger.level = level;
   }
 

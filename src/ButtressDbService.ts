@@ -16,9 +16,9 @@
 import { LitElement, css, html } from 'lit';
 import { property } from 'lit/decorators.js';
 import { ContextProvider } from '@lit/context';
-import { LtnLogger, LtnLogLevel, LtnLogLevelStrings } from '@lighten/ltn-element';
 
 import { buttressDbServiceContext } from './context.js';
+import { Logger, LogLevel, LogLevelStrings } from './Logger.js';
 import ButtressDataService, { QueryOpts } from './ButtressDataService.js';
 import {ButtressStore, ButtressStoreInterface, ButtressEntity, NotifyChangeOpts, CRCallback} from './ButtressStore.js';
 import ButtressRealtime from './ButtressRealtime.js';
@@ -67,7 +67,7 @@ export class ButtressDbService extends LitElement {
   @property({type: String})
   logLevel: string = 'info';
 
-  private _logger: LtnLogger = new LtnLogger(this.tagName.toLowerCase());
+  private _logger: Logger = new Logger(this.tagName.toLowerCase());
 
   // Descendants get this element with @consume({ context: buttressDbServiceContext }).
   private _contextProvider = new ContextProvider(this, { context: buttressDbServiceContext, initialValue: this });
@@ -142,9 +142,9 @@ export class ButtressDbService extends LitElement {
   }
 
   private _initLogger() {
-    const logLevel = this.logLevel?.toUpperCase() as LtnLogLevelStrings;
-    if (typeof LtnLogLevel[logLevel] === 'number') {
-      this._setLogLevel(LtnLogLevel[logLevel]);
+    const logLevel = this.logLevel?.toUpperCase() as LogLevelStrings;
+    if (typeof LogLevel[logLevel] === 'number') {
+      this._setLogLevel(LogLevel[logLevel]);
     }
 
     const logLabel = this.getAttribute('log-label');
@@ -276,7 +276,7 @@ export class ButtressDbService extends LitElement {
     return true;
   }
 
-  protected _setLogLevel(level: LtnLogLevel) {
+  protected _setLogLevel(level: LogLevel) {
     this._logger.level = level;
 
     this._settings.logLevel = level;

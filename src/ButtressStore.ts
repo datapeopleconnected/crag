@@ -14,7 +14,8 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { LtnLogger, LtnLogLevel, LtnService } from '@lighten/ltn-element';
+import { v4 as uuidv4 } from 'uuid';
+import { Logger, LogLevel } from './Logger.js';
 import {ButtressSchema, ButtressSchemaHelpers} from './ButtressSchema.js';
 
 export interface ButtressStoreInterface {
@@ -92,7 +93,7 @@ let dedupeId = 0;
 
 export class ButtressStore implements ButtressStoreInterface {
 
-  private __logger: LtnLogger;
+  private __logger: Logger;
 
   // private __data: {[key: string]: ButtressEntity} = {};
   private __data: Map<string, Map<string, ButtressEntity>> = new Map();
@@ -106,10 +107,10 @@ export class ButtressStore implements ButtressStoreInterface {
   private __subscriptions: Subscriptions = {};
 
   constructor() {
-    this.__logger = new LtnLogger('buttress-store');
+    this.__logger = new Logger('buttress-store');
   }
 
-  setLogLevel(level: LtnLogLevel) {
+  setLogLevel(level: LogLevel) {
     this.__logger.level = level;
   }
 
@@ -446,7 +447,7 @@ export class ButtressStore implements ButtressStoreInterface {
 
   // eslint-disable-next-line class-methods-use-this
   subscribe(pathsStr: string, fn: CRCallback): string {
-    const id = LtnService.generateId();
+    const id = uuidv4();
     this.__logger.debug('subscribe', pathsStr);
     const paths = pathsStr.trim().split(',')
       .map((path) => this.__parsePath(path.trim()));

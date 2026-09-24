@@ -16,7 +16,7 @@
 
 import {io} from 'socket.io-client';
 
-import {LtnLogger, LtnLogLevel} from '@lighten/ltn-element';
+import {Logger, LogLevel} from './Logger.js';
 
 import {customButtressStoreInterface, EventDataDataServiceLoadById} from "./ButtressDbService.js";
 
@@ -29,7 +29,7 @@ interface PathParts {
 
 export default class ButtressDataRealtime {
 
-  private _logger: LtnLogger;
+  private _logger: Logger;
 
   private _store: customButtressStoreInterface;
 
@@ -63,7 +63,7 @@ export default class ButtressDataRealtime {
     this._store = store;
     this._settings = settings;
 
-    this._logger = new LtnLogger('buttress-data-realtime');
+    this._logger = new Logger('buttress-data-realtime');
 
     this._dispatchCustomEvent = dispatchCustomEvent;
     this._loadById = loadById;
@@ -120,7 +120,7 @@ export default class ButtressDataRealtime {
     this._connected = false;
   }
 
-  setLogLevel(level: LtnLogLevel) {
+  setLogLevel(level: LogLevel) {
     this._logger.level = level;
   }
 

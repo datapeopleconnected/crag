@@ -51,7 +51,6 @@
     "COPYING"
   ],
   "dependencies": {
-    "@lighten/ltn-element": "0.0.7",
     "@lit/context": "^1.1.6",
     "bson": "~6.8.0",
     "lit": "^2.7.2",

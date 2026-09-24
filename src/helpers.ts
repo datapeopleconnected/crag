@@ -15,10 +15,10 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 
-import { LtnLogLevel } from '@lighten/ltn-element';
+import { LogLevel } from './Logger.js';
 
 export interface Settings {
-  [index: string]: string | undefined | string[] | LtnLogLevel;
+  [index: string]: string | undefined | string[] | LogLevel;
 
   clientSessionId: string;
 
@@ -27,7 +27,7 @@ export interface Settings {
   apiPath?: string;
   userId?: string;
   coreSchema?: string[];
-  logLevel?: LtnLogLevel;
+  logLevel?: LogLevel;
 };
 
 export function buildSettings(settings: Partial<Settings>): Settings {

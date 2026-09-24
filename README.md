@@ -58,7 +58,8 @@ instead of the ltn service locator.
   `db.addEventListener('bjs-connection-changed', (e) => ...)`, where `e.detail` is the connection state.
 - Also removed: the `scope` attribute, the `_debug()`/`_info()`/`_warn()`/`_error()`/`_sys()` helpers and the static
   `generateId()`.
-- The `loglevel`, `log-label` and `log-disable` attributes work as before.
+- The `loglevel`, `log-label` and `log-disable` attributes work as before, but logging now goes through crag's own
+  logger: `LtnLogger.disableLogging` no longer silences it, and `Settings.logLevel` uses the exported `LogLevel` enum.
 
 ## Linting and formatting
 
