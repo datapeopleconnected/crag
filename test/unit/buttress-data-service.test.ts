@@ -431,3 +431,246 @@ describe('ButtressDataService $exists', () => {
     expect(ids({ tags: { $exists: true } })).to.deep.equal(['set', 'null', 'falsy']);
   });
 });
+
+// What each write sends to Buttress, for the cases that already work. These pin the behaviour while writes move
+// from being worked out from store notifications to being sent by the write methods themselves.
+describe('ButtressDataService writes', () => {
+  type Sent = { method: string; path: string; body?: unknown };
+
+  let originalFetch: typeof window.fetch;
+  let sent: Sent[];
+  let status: number;
+
+  const writeSchema: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: {
+      name: { __type: 'string' },
+      tags: { __type: 'array' },
+      // @ts-expect-error ButtressSchemaProperty can't type a plain nested object, though the store handles one.
+      address: { city: { __type: 'string' } },
+      contacts: { __type: 'array', __schema: { phones: { __type: 'array' } } },
+    },
+  };
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    sent = [];
+    status = 200;
+    Logger.disableLogging = true;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({
+        method: init!.method!,
+        path: new URL(input.toString()).pathname.replace('/api/v1/organisation', ''),
+        body,
+      });
+      return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  // A data service with entity x in its store, as if it had been queried.
+  const withEntity = () => {
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      writeSchema,
+    );
+    ds.get('organisation').set('x', {
+      id: 'x',
+      name: 'a',
+      tags: ['a', 'b'],
+      address: { city: 'Leeds' },
+      contacts: [{ id: 'c1', phones: [] }],
+    });
+    return ds;
+  };
+
+  const settle = async (ds: ButtressDataService) => {
+    await flush();
+    await ds.nextIdle();
+  };
+
+  const tracked = () => {
+    let outcome = 'pending';
+    const dboComplete = {
+      resolve: () => {
+        outcome = 'resolved';
+      },
+      reject: () => {
+        outcome = 'rejected';
+      },
+    };
+    return { dboComplete, outcome: () => outcome };
+  };
+
+  it('sends a set as an update to that path', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.name', 'b');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } }]);
+  });
+
+  it('sends a set inside a nested object or array item with the path from the entity', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.address.city', 'York');
+    ds.set('organisation.x.tags.0', 'z');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([
+      { method: 'PUT', path: '/x', body: { path: 'address.city', value: 'York' } },
+      { method: 'PUT', path: '/x', body: { path: 'tags.0', value: 'z' } },
+    ]);
+  });
+
+  it('sends a whole array set as an update with the array', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.tags', ['c']);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags', value: ['c'] } }]);
+  });
+
+  it('sends a set of an entity that is not in the store as an add', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.y', { id: 'y', name: 'y' });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'POST', path: '/', body: { id: 'y', name: 'y' } }]);
+  });
+
+  it('sends a push of one item as an update that appends it', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.tags', 'c');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags', value: 'c' } }]);
+  });
+
+  it('sends a push into an array item with the path from the entity', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.contacts.0.phones', '0113');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'contacts.0.phones', value: '0113' } }]);
+  });
+
+  it('gives a pushed object an id', async () => {
+    const ds = withEntity();
+
+    ds.push('organisation.x.contacts', { phones: [] });
+    await settle(ds);
+
+    const { value } = sent[0].body as { value: { id: string } };
+    expect(value.id).to.match(/^[0-9a-f]{24}$/);
+    expect(ds.get('organisation.x.contacts.1.id')).to.equal(value.id);
+  });
+
+  it('sends a splice removing one item as a remove at that index', async () => {
+    const ds = withEntity();
+
+    ds.splice('organisation.x.tags', 1, 1);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'tags.1.__remove__', value: '' } }]);
+  });
+
+  it('sends a create as an add', async () => {
+    const ds = withEntity();
+
+    ds.create({ id: 'y', name: 'y' });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'POST', path: '/', body: { id: 'y', name: 'y' } }]);
+  });
+
+  it('sends a delete', async () => {
+    const ds = withEntity();
+
+    ds.delete('x');
+    await settle(ds);
+
+    expect(sent).to.deep.equal([{ method: 'DELETE', path: '/x', body: undefined }]);
+    expect(ds.get('organisation.x')).to.equal(undefined);
+  });
+
+  it('sends nothing for localOnly writes', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.name', 'b', { localOnly: true });
+    ds.pushExt('organisation.x.tags', { localOnly: true }, 'c');
+    ds.spliceExt('organisation.x.tags', 0, 1, { localOnly: true });
+    ds.create({ id: 'y', name: 'y' }, { localOnly: true });
+    ds.delete('y', { localOnly: true });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(ds.get('organisation.x.name')).to.equal('b');
+    expect(ds.get('organisation.x.tags')).to.deep.equal(['b', 'c']);
+  });
+
+  it('sends nothing for silent or forceChanged sets', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.name', 'b', { silent: true });
+    ds.set('organisation.x.address.city', 'York', { forceChanged: true });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(ds.get('organisation.x.name')).to.equal('b');
+  });
+
+  it('sends nothing, and resolves dboComplete, when the value has not changed', async () => {
+    const ds = withEntity();
+    const { dboComplete, outcome } = tracked();
+
+    ds.set('organisation.x.name', 'a', { dboComplete });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(outcome()).to.equal('resolved');
+  });
+
+  it('resolves dboComplete once Buttress accepts the write', async () => {
+    const ds = withEntity();
+    const set = tracked();
+    const created = tracked();
+    const deleted = tracked();
+
+    ds.set('organisation.x.name', 'b', { dboComplete: set.dboComplete });
+    ds.create({ id: 'y', name: 'y' }, { dboComplete: created.dboComplete });
+    await settle(ds);
+    ds.delete('y', { dboComplete: deleted.dboComplete });
+    await settle(ds);
+
+    expect([set.outcome(), created.outcome(), deleted.outcome()]).to.deep.equal(['resolved', 'resolved', 'resolved']);
+  });
+
+  it('rejects dboComplete when Buttress rejects the write', async () => {
+    const ds = withEntity();
+    const { dboComplete, outcome } = tracked();
+    const originalError = console.error;
+    console.error = () => {};
+    status = 400;
+
+    ds.set('organisation.x.name', 'b', { dboComplete });
+    await settle(ds);
+    console.error = originalError;
+
+    expect(outcome()).to.equal('rejected');
+  });
+});
