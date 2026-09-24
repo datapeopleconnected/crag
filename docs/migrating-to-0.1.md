@@ -284,6 +284,9 @@ realtime updates whose `data.clientSessionId` matches.
     an error that could stop other subscribers hearing about other changes. It now does nothing;
   - deleting an entity that isn't in the store threw an error. It now does nothing and returns `false`;
   - `dboComplete` was never called for `localOnly`, `silent` or `forceChanged` writes. It's now called straight away.
+- **`forceChanged` leaves your options alone.** It used to set `localOnly: true` on the options object you passed,
+  so subscribers saw `localOnly` in `opts` too. A `forceChanged` write still isn't sent, but `opts` is now exactly
+  what you passed.
 - **`push` and `splice` send the whole change.** They used to send only the first added item, or a single removed
   item, and the rest changed the store without reaching Buttress. `push` now sends every item, a `splice` that removes
   several items sends every removal, and a `splice` that inserts before the end, or removes and adds, sends the whole

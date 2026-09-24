@@ -128,3 +128,19 @@ describe('ButtressStore.splice', () => {
     expect(store.get('organisation.org1.tags')).to.deep.equal(['a', 'x', 'b', 'c']);
   });
 });
+
+describe('ButtressStore forceChanged', () => {
+  it('notifies subscribers without changing the options passed in', async () => {
+    const store = storeWith({ id: 'org1', name: 'a' });
+    const notified: unknown[] = [];
+    await Promise.resolve();
+    store.subscribe('organisation.*', (cr: { opts: unknown }) => notified.push(cr.opts));
+    const opts = { forceChanged: true };
+
+    store.set('organisation.org1.name', 'a', opts);
+    await Promise.resolve();
+
+    expect(opts).to.deep.equal({ forceChanged: true });
+    expect(notified).to.deep.equal([{ forceChanged: true }]);
+  });
+});

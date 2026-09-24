@@ -566,14 +566,6 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this._queue.nextIdle();
   }
 
-  // _generateListRequest(): Promise<void> {
-  //   return this.__queueRequest({
-  //     type: 'list',
-  //     url: this.getUrl(),
-  //     method: 'GET',
-  //   });
-  // }
-
   private __generateGetByIdRequest(entityId: string): Promise<ButtressEntity> {
     return this._queue.push({ type: 'get', method: 'GET', url: this.getUrl(entityId), entityId });
   }

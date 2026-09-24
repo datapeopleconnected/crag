@@ -181,7 +181,7 @@ Before you write:
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `localOnly`                        | Changes the store without sending anything to Buttress.                                                   |
 | `silent`                           | Doesn't notify subscribers, and sends nothing to Buttress.                                                |
-| `forceChanged`                     | Notifies subscribers even if the value hasn't changed. Implies `localOnly`.                               |
+| `forceChanged`                     | Notifies subscribers even if the value hasn't changed, and sends nothing to Buttress.                     |
 | `dboComplete: { resolve, reject }` | Called when the request to Buttress finishes, or straight away if nothing is sent.                        |
 
 To wait until a change has reached Buttress:

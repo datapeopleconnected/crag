@@ -48,6 +48,7 @@ interface PathSig {
 }
 
 export interface NotifyChangeOpts {
+  // The store never sends anything: the data service reads these to decide whether a write goes to Buttress.
   localOnly?: boolean;
   forceChanged?: boolean;
   silent?: boolean;
@@ -195,7 +196,6 @@ export class ButtressStore implements ButtressStoreInterface {
     const len = array.length;
     const ret = array.push(...items);
 
-    // if (!opts?.localOnly && items.length) {
     if (items.length) {
       this.__notifySplices(array, path, [
         {
@@ -267,10 +267,7 @@ export class ButtressStore implements ButtressStoreInterface {
       }
 
       // set() stores nothing, and returns undefined, when an object on the way to the array is missing
-      const setPath = this.set(path, [], {
-        localOnly: true,
-        silent: true,
-      });
+      const setPath = this.set(path, [], { silent: true });
       if (!setPath) {
         throw new Error(`Unable to call ${method} on ${path}: ${parts.slice(0, -1).join('.')} is not in the store`);
       }
@@ -316,13 +313,10 @@ export class ButtressStore implements ButtressStoreInterface {
     const old = this.get(path);
 
     if (opts?.forceChanged && old !== undefined) {
-      const modifiedOpts = opts;
-      modifiedOpts.localOnly = true;
-
       if (!this.__dataPending) this.__dataPending = {};
       this.__dataPending[path] = {
         value,
-        opts: modifiedOpts,
+        opts,
       };
 
       this.__invalidateData();
