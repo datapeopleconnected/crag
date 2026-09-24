@@ -35,7 +35,6 @@ import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { Settings, buildSettings } from './helpers.js';
 
 export interface customButtressStoreInterface extends ButtressStoreInterface {
-  clearQueryMap: Function;
   clearQueryMaps: () => void;
 }
 
@@ -147,7 +146,6 @@ export class ButtressDbService extends LitElement {
         this._getDataService(path).spliceExt(path, start, deleteCount, opts, ...items),
       notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): boolean =>
         this._getDataService(path).notifyPath(path, value, opts),
-      clearQueryMap: (path: string) => this._getDataService(path).clearQueryMap(),
       clearQueryMaps: () => Object.values(this._dataServices).forEach((ds) => ds.clearQueryMap()),
     };
 

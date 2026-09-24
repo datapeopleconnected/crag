@@ -161,4 +161,44 @@ describe('ButtressRealtime', () => {
 
     expect(() => realtime.connect()).to.throw(/'token'/);
   });
+
+  describe('db-activity', () => {
+    const setup = () => {
+      const settings = buildSettings({});
+      const realtime = new ButtressRealtime(
+        {} as any,
+        settings,
+        () => {},
+        () => {},
+      );
+      const applied: unknown[] = [];
+      (realtime as any)._parsePayload = (data: unknown) => applied.push(data);
+      const receive = (data: object) => (realtime as any)._handleRxEvent('db-activity', { time: '', data });
+      return { settings, applied, receive };
+    };
+
+    it('skips updates from its own session', () => {
+      const { settings, applied, receive } = setup();
+
+      receive({ clientSessionId: settings.clientSessionId, isSameApp: true });
+
+      expect(applied.length).to.equal(0);
+    });
+
+    it('applies updates from another session', () => {
+      const { applied, receive } = setup();
+
+      receive({ clientSessionId: 'someone-else' });
+
+      expect(applied.length).to.equal(1);
+    });
+
+    it('applies updates shared from another app, whatever their session id', () => {
+      const { settings, applied, receive } = setup();
+
+      receive({ clientSessionId: settings.clientSessionId, isSameApp: false });
+
+      expect(applied.length).to.equal(1);
+    });
+  });
 });

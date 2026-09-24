@@ -227,7 +227,8 @@ realtime updates whose `data.clientSessionId` matches.
   doesn't, crag applies its own changes a second time when they come back.
 - Two tabs, or two elements, signed in as the same user now see each other's changes in real time. Before, they
   skipped them because the `userId` matched.
-- `userId` is still used for access-control updates, so keep setting it.
+- crag no longer uses `userId` itself. It used to refresh schemas when Buttress sent an access-control update for that
+  user, but Buttress no longer sends those updates. You can still set it and read it back with `getUserId()`.
 - If you build a `Settings` object in TypeScript, it now needs a `clientSessionId` string, such as one from
   `crypto.randomUUID()`.
 
