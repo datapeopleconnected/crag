@@ -31,6 +31,8 @@ npm install @buttress/crag@^0.1.0 @lit/context lit@^3
   keep it, the page will load both Lit 2 and Lit 3, because ltn-element requires Lit 2.
 - Check that there's one copy of Lit with `npm ls lit`. More than one copy causes a "Multiple versions of Lit loaded"
   warning in development.
+- crag no longer depends on `bson`: it generates ObjectIds itself. If your app imports `bson`, make sure it's in your
+  own `package.json`, as it may only have been installed because crag needed it.
 
 ## 2. Put your components inside `<buttress-db-service>`
 
