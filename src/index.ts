@@ -15,6 +15,7 @@
  */
 
 export { ButtressDbService } from './ButtressDbService.js';
+export type { WriteOpts } from './ButtressDbService.js';
 export { buttressDbServiceContext } from './context.js';
 export type { QueryResult } from './ButtressDataService.js';
 export type { ButtressEntity, CRCallback, CR } from './ButtressStore.js';

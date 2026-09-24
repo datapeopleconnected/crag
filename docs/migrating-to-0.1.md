@@ -275,6 +275,9 @@ realtime updates whose `data.clientSessionId` matches.
 - **`$exists` matches on whether the property is there.** Locally it used to be the same test as `$eq`, so
   `{ $exists: true }` only matched properties whose value was `true`. It now matches as Buttress does: `true` for a
   property that's present, even if it's `null`, and `false` for one that's missing.
+- **Writes can be awaited.** Pass `{ wait: true }` to `create`, `set` or `delete`, or use the new `pushWith` and
+  `spliceWith`, to get a promise that settles once Buttress has accepted or rejected the write. Without `wait`,
+  nothing changes. `dboComplete` still works too.
 - **`set`, `create` and `delete` send their own requests.** They used to be worked out from the store's change
   notifications a moment later, which went wrong in several ways that are now fixed:
   - a `set` and then a `delete` of the same entity in one go threw an error, and the delete wasn't sent;

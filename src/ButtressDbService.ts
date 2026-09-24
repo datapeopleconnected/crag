@@ -40,6 +40,14 @@ export interface customButtressStoreInterface extends ButtressStoreInterface {
   localName: (schemaName: string) => string | undefined;
 }
 
+export interface WriteOpts extends NotifyChangeOpts {
+  // Return a promise of the result that settles once Buttress has accepted the write, or has rejected it.
+  wait?: boolean;
+}
+
+type WaitOpts = WriteOpts & { wait: true };
+type NoWaitOpts = WriteOpts & { wait?: false };
+
 export interface EventDataDataServiceLoadById {
   schemaName: string;
   id: string;
@@ -341,36 +349,100 @@ export class ButtressDbService extends LitElement {
     dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
   }
 
-  create(path: string, value: ButtressEntity, opts?: NotifyChangeOpts): string | undefined {
+  create(path: string, value: ButtressEntity, opts: WaitOpts): Promise<string | undefined>;
+  create(path: string, value: ButtressEntity, opts?: NoWaitOpts): string | undefined;
+  create(path: string, value: ButtressEntity, opts?: WriteOpts): string | undefined | Promise<string | undefined>;
+  create(path: string, value: ButtressEntity, opts?: WriteOpts) {
     const parts = path.toString().split('.');
     if (parts.length > 1) throw new Error('Create is only avaible for top level entities');
     const [schema] = parts;
 
-    return this._dsStoreInterface.create(schema, value, opts);
+    return this._write(opts, (o) => this._dsStoreInterface.create(schema, value, o));
   }
 
-  delete(path: string, opts?: NotifyChangeOpts): boolean {
+  delete(path: string, opts: WaitOpts): Promise<boolean>;
+  delete(path: string, opts?: NoWaitOpts): boolean;
+  delete(path: string, opts?: WriteOpts): boolean | Promise<boolean>;
+  delete(path: string, opts?: WriteOpts) {
     const parts = path.toString().split('.');
     if (parts.length > 2) throw new Error('Delete is only avaible for top level entities');
     const [schema, id] = parts;
 
-    return this._dsStoreInterface.delete(schema, id, opts);
+    return this._write(opts, (o) => this._dsStoreInterface.delete(schema, id, o));
   }
 
   get<T extends ButtressEntity>(path: string): T | undefined {
     return this._dsStoreInterface.get(path);
   }
 
-  set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
-    return this._dsStoreInterface.set(path, value, opts);
+  set(path: string, value: unknown, opts: WaitOpts): Promise<string | undefined>;
+  set(path: string, value: unknown, opts?: NoWaitOpts): string | undefined;
+  set(path: string, value: unknown, opts?: WriteOpts): string | undefined | Promise<string | undefined>;
+  set(path: string, value: unknown, opts?: WriteOpts) {
+    return this._write(opts, (o) => this._dsStoreInterface.set(path, value, o));
   }
 
   push(path: string, ...items: any[]): number {
     return this._dsStoreInterface.push(path, ...items);
   }
 
+  // push with options. They come before the items, since an item can be an object too.
+  pushWith(path: string, opts: WaitOpts, ...items: unknown[]): Promise<number>;
+  pushWith(path: string, opts?: NoWaitOpts, ...items: unknown[]): number;
+  pushWith(path: string, opts?: WriteOpts, ...items: unknown[]): number | Promise<number>;
+  pushWith(path: string, opts?: WriteOpts, ...items: unknown[]) {
+    return this._write(opts, (o) => this._dsStoreInterface.pushExt(path, o, ...items));
+  }
+
   splice(path: string, start: number, deleteCount?: number, ...items: any[]): any[] {
     return this._dsStoreInterface.splice(path, start, deleteCount, ...items);
+  }
+
+  // splice with options. They come before the items, since an item can be an object too.
+  spliceWith(
+    path: string,
+    start: number,
+    deleteCount: number | undefined,
+    opts: WaitOpts,
+    ...items: unknown[]
+  ): Promise<unknown[]>;
+  spliceWith(path: string, start: number, deleteCount?: number, opts?: NoWaitOpts, ...items: unknown[]): unknown[];
+  spliceWith(
+    path: string,
+    start: number,
+    deleteCount?: number,
+    opts?: WriteOpts,
+    ...items: unknown[]
+  ): unknown[] | Promise<unknown[]>;
+  spliceWith(path: string, start: number, deleteCount?: number, opts?: WriteOpts, ...items: unknown[]) {
+    return this._write(opts, (o) => this._dsStoreInterface.spliceExt(path, start, deleteCount, o, ...items));
+  }
+
+  // Runs a write. With wait, returns a promise of its result that settles with the write's dboComplete. The write
+  // itself still runs straight away, so an invalid call throws rather than rejecting.
+  private _write<T>(opts: WriteOpts | undefined, write: (opts?: NotifyChangeOpts) => T): T | Promise<T> {
+    if (!opts?.wait) return write(opts);
+
+    const { wait: _wait, ...rest } = opts;
+    let settle!: { resolve: () => void; reject: (err: unknown) => void };
+    const done = new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    const result = write({
+      ...rest,
+      dboComplete: {
+        resolve: (value?: unknown) => {
+          rest.dboComplete?.resolve(value);
+          settle.resolve();
+        },
+        reject: (err?: unknown) => {
+          rest.dboComplete?.reject(err);
+          settle.reject(err);
+        },
+      },
+    });
+
+    return done.then(() => result);
   }
 
   subscribe(path: string, cb: CRCallback): string {

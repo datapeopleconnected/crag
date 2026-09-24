@@ -163,6 +163,8 @@ any time.
 | `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
+| `pushWith(path, opts, ...items)`              | `push` with options. The options come before the items, since an item can be an object too.                                                        |
+| `spliceWith(path, start, deleteCount, opts, ...items)` | `splice` with options, before the items as for `pushWith`.                                                                                 |
 | `delete(path, opts?)`                         | Deletes an entity: `delete('organisation.<id>')`. Returns whether it was in the store.                                                             |
 | `nextIdle(schema)`                            | Resolves once that schema has no requests queued or waiting for a response from Buttress. It also waits for requests queued in the meantime. |
 
@@ -175,10 +177,11 @@ Before you write:
 - Objects added to an array are given an `id` if they don't have one.
 - `create` and `delete` work on whole entities: `create` takes a schema name and `delete` takes `<schema>.<id>`.
 
-`create`, `set` and `delete` take these options:
+`create`, `set`, `delete`, `pushWith` and `spliceWith` take these options:
 
 | Option                             | Effect                                                                                                    |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `wait`                             | Returns a promise of the usual result, which resolves once Buttress has accepted the write and rejects with a [`ButtressError`](#errors) if it doesn't. The store still changes straight away. |
 | `localOnly`                        | Changes the store without sending anything to Buttress.                                                   |
 | `silent`                           | Doesn't notify subscribers, and sends nothing to Buttress.                                                |
 | `forceChanged`                     | Notifies subscribers even if the value hasn't changed, and sends nothing to Buttress.                     |
@@ -187,10 +190,12 @@ Before you write:
 To wait until a change has reached Buttress:
 
 ```ts
-await new Promise((resolve, reject) => {
-  db.set(`${path}.name`, 'New name', { dboComplete: { resolve, reject } });
-});
+await db.set(`${path}.name`, 'New name', { wait: true });
+const length = await db.pushWith(`${path}.tags`, { wait: true }, 'new-tag');
 ```
+
+A write that isn't sent resolves straight away. An invalid call, such as creating an entity whose `id` is already in
+the store, still throws rather than returning a promise.
 
 ### Subscribing
 

@@ -19,7 +19,7 @@ import { html, LitElement } from 'lit';
 import { consume } from '@lit/context';
 
 import '../../src/components/buttress-db-service.js';
-import { ButtressDbService } from '../../src/ButtressDbService.js';
+import { ButtressDbService, WriteOpts } from '../../src/ButtressDbService.js';
 import { buttressDbServiceContext } from '../../src/context.js';
 import { ButtressError } from '../../src/ButtressClient.js';
 
@@ -487,5 +487,150 @@ describe('ButtressDbService requests', () => {
 
     expect(err).to.be.instanceOf(ButtressError);
     expect(err.serverMessage).to.equal('nope');
+  });
+});
+
+describe('ButtressDbService wait', () => {
+  let originalFetch: typeof window.fetch;
+  let status: number;
+  let holdWrites: Promise<void> | undefined;
+  let writes: number;
+
+  const schemas = [
+    {
+      name: 'organisation',
+      type: 'collection',
+      properties: { name: { __type: 'string' }, tags: { __type: 'array' } },
+    },
+  ];
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    status = 200;
+    holdWrites = undefined;
+    writes = 0;
+    window.fetch = async (input: RequestInfo | URL) => {
+      if (new URL(input.toString()).pathname.endsWith('/app/schema')) return new Response(JSON.stringify(schemas));
+      writes += 1;
+      await holdWrites;
+      return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  // A connected element with organisation x in its store.
+  const connected = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    el.create('organisation', { id: 'x', name: 'a', tags: ['a', 'b'] }, { localOnly: true });
+    return el;
+  };
+
+  const outcomeOf = (value: unknown) =>
+    Promise.race([
+      Promise.resolve(value).then(
+        () => 'resolved',
+        () => 'rejected',
+      ),
+      new Promise((resolve) => {
+        setTimeout(() => resolve('pending'), 50);
+      }),
+    ]);
+
+  it('returns the same values as before without wait', async () => {
+    const el = await connected();
+
+    expect(el.set('organisation.x.name', 'b')).to.equal('organisation.x.name');
+    expect(el.pushWith('organisation.x.tags', {}, 'c')).to.equal(3);
+    expect(el.spliceWith('organisation.x.tags', 0, 1, {})).to.deep.equal(['a']);
+    expect(el.create('organisation', { id: 'y', name: 'y' })).to.equal('organisation.y');
+    expect(el.delete('organisation.y')).to.equal(true);
+  });
+
+  it('resolves with wait once Buttress has accepted the write', async () => {
+    const el = await connected();
+    let release!: () => void;
+    holdWrites = new Promise((resolve) => {
+      release = resolve;
+    });
+
+    const setting = el.set('organisation.x.name', 'b', { wait: true });
+
+    expect(el.get('organisation.x.name')).to.equal('b');
+    expect(await outcomeOf(setting)).to.equal('pending');
+    release();
+    expect(await setting).to.equal('organisation.x.name');
+  });
+
+  it('resolves each write with wait to the value it returns without it', async () => {
+    const el = await connected();
+
+    expect(await el.create('organisation', { id: 'y', name: 'y' }, { wait: true })).to.equal('organisation.y');
+    expect(await el.pushWith('organisation.x.tags', { wait: true }, 'c')).to.equal(3);
+    expect(await el.spliceWith('organisation.x.tags', 0, 1, { wait: true })).to.deep.equal(['a']);
+    expect(await el.delete('organisation.y', { wait: true })).to.equal(true);
+    expect(writes).to.equal(4);
+  });
+
+  it('types the result as a promise only with wait', async () => {
+    const el = await connected();
+    const maybe: WriteOpts = { wait: false };
+
+    // Checked by tsc: each assignment fails to compile if the overloads give the wrong type.
+    const path: string | undefined = el.set('organisation.x.name', 'b');
+    const waited: Promise<string | undefined> = el.set('organisation.x.name', 'c', { wait: true });
+    const either: string | undefined | Promise<string | undefined> = el.set('organisation.x.name', 'd', maybe);
+    const length: number = el.pushWith('organisation.x.tags', {}, 'c');
+    const removed: Promise<unknown[]> = el.spliceWith('organisation.x.tags', 0, 1, { wait: true });
+
+    expect([path, await waited, await either, length, await removed]).to.have.length(5);
+  });
+
+  it('rejects with wait when Buttress rejects the write', async () => {
+    const el = await connected();
+    const originalError = console.error;
+    console.error = () => {};
+    status = 400;
+
+    const err = await el.set('organisation.x.name', 'b', { wait: true }).catch((e: unknown) => e);
+    console.error = originalError;
+
+    expect(err).to.be.instanceOf(ButtressError);
+  });
+
+  it('resolves straight away with wait for a write that is not sent', async () => {
+    const el = await connected();
+
+    expect(await el.set('organisation.x.name', 'b', { wait: true, localOnly: true })).to.equal('organisation.x.name');
+    expect(writes).to.equal(0);
+  });
+
+  it('still throws straight away for an invalid call with wait', async () => {
+    const el = await connected();
+
+    expect(() => el.create('organisation.x', { id: 'z' }, { wait: true })).to.throw();
+  });
+
+  it('still calls dboComplete with wait', async () => {
+    const el = await connected();
+    let called = false;
+
+    await el.set('organisation.x.name', 'b', {
+      wait: true,
+      dboComplete: {
+        resolve: () => {
+          called = true;
+        },
+        reject: () => {},
+      },
+    });
+
+    expect(called).to.equal(true);
   });
 });
