@@ -17,7 +17,7 @@
 import { expect } from '@open-wc/testing';
 
 import ButtressDataService from '../../src/ButtressDataService.js';
-import ButtressStore from '../../src/ButtressStore.js';
+import ButtressStore, { ButtressEntity } from '../../src/ButtressStore.js';
 import ButtressSchema from '../../src/ButtressSchema.js';
 import { Logger } from '../../src/Logger.js';
 
@@ -158,5 +158,156 @@ describe('ButtressDataService request queue', () => {
     await idle;
 
     expect((ds as any).__awaitIdleQueue.length).to.equal(0);
+  });
+});
+
+describe('ButtressDataService query', () => {
+  type Org = { id: string; name: string; status: string };
+
+  let originalFetch: typeof window.fetch;
+  let server: Org[];
+  let searches: number;
+
+  // Pretends to be Buttress: answers searches (with $eq, sort, skip and limit) and counts from `server`.
+  const matches = (org: Org, query: Record<string, { $eq: string }>) =>
+    Object.entries(query).every(([field, { $eq }]) => (org as any)[field] === $eq);
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    Logger.disableLogging = true;
+    searches = 0;
+    server = Array.from({ length: 25 }, (_, i) => ({
+      id: `id${String(i + 1).padStart(2, '0')}`,
+      name: `A${String(i + 1).padStart(2, '0')}`,
+      status: 'active',
+    }));
+    server.push({ id: 'idx', name: 'Inactive', status: 'inactive' });
+
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString());
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      if (init?.method === 'SEARCH' && url.pathname.endsWith('/organisation/count')) {
+        return new Response(JSON.stringify(server.filter((o) => matches(o, body.query)).length));
+      }
+      if (init?.method === 'SEARCH') {
+        searches += 1;
+        let found = server.filter((o) => matches(o, body.query));
+        if (body.sort?.name) found = found.sort((a, b) => (a.name < b.name ? -body.sort.name : body.sort.name));
+        found = found.slice(body.skip, body.limit ? body.skip + body.limit : undefined);
+        return new Response(JSON.stringify(found));
+      }
+      return new Response('{}');
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  const active = { status: { $eq: 'active' } };
+  const byName = { path: 'name', direction: 'ASC' as const };
+  const names = (results: ButtressEntity[]) => results.map((r) => r.name);
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => `A${String(from + i).padStart(2, '0')}`);
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      schema,
+    );
+
+  it('returns the page the server sent when it is the first page loaded', async () => {
+    const ds = dataService();
+
+    const { results, total } = await ds.query(active, { limit: 10, skip: 10, sort: byName });
+
+    expect(names(results)).to.deep.equal(range(11, 20));
+    expect(total).to.equal(25);
+  });
+
+  it('leaves other matching entities in the store off a page', async () => {
+    const ds = dataService();
+    // An entity the server no longer counts as a match, but the store still does.
+    ds.get('organisation').set('stale', { id: 'stale', name: 'A00', status: 'active' });
+
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(names(results)).to.deep.equal(range(1, 10));
+  });
+
+  it('treats skip without limit as a page', async () => {
+    const ds = dataService();
+    ds.get('organisation').set('stale', { id: 'stale', name: 'A00', status: 'active' });
+
+    const { results } = await ds.query(active, { skip: 20, sort: byName });
+
+    expect(names(results)).to.deep.equal(range(21, 25));
+  });
+
+  it('serves a page again from the cache', async () => {
+    const ds = dataService();
+
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(searches).to.equal(1);
+    expect(names(results)).to.deep.equal(range(1, 10));
+  });
+
+  it('drops entities from a cached page once they no longer match', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    ds.set('organisation.id03.status', 'inactive');
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(names(results)).to.deep.equal(range(1, 10).filter((n) => n !== 'A03'));
+  });
+
+  it('drops deleted entities from a cached page', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    ds.delete('id02');
+    const { results } = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(names(results)).to.deep.equal(range(1, 10).filter((n) => n !== 'A02'));
+  });
+
+  it('adds new entities to a cached page only when busted', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+    server.push({ id: 'id00', name: 'A00', status: 'active' });
+
+    const cached = await ds.query(active, { limit: 10, skip: 0, sort: byName });
+    const busted = await ds.query(active, { limit: 10, skip: 0, sort: byName, bust: true });
+
+    expect(names(cached.results)).to.deep.equal(range(1, 10));
+    expect(names(busted.results)).to.deep.equal(['A00', ...range(1, 9)]);
+  });
+
+  it('searches again after clearQueryMap', async () => {
+    const ds = dataService();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    ds.clearQueryMap();
+    await ds.query(active, { limit: 10, skip: 0, sort: byName });
+
+    expect(searches).to.equal(2);
+  });
+
+  it('includes local changes in an unpaged query', async () => {
+    const ds = dataService();
+    await ds.query(active, { sort: byName });
+
+    ds.create({ id: 'local', name: 'A00', status: 'active' });
+    ds.set('organisation.id03.status', 'inactive');
+    const { results } = await ds.query(active, { sort: byName });
+
+    expect(names(results)).to.deep.equal(['A00', ...range(1, 25).filter((n) => n !== 'A03')]);
   });
 });

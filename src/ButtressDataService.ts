@@ -70,7 +70,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _settings: Settings;
 
-  private _queryMap: Array<string> = [];
+  // The ids each search returned, in the server's order, keyed by __queryKey().
+  private _queryCache: Map<string, string[]> = new Map();
 
   private _requestQueue: Array<any> = [];
 
@@ -358,51 +359,56 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
     if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
-    // We only need to make a call to fetch the data into our local store. We then
-    // filter the data in the local store to get the results of the query.
+    // Fetches the matching entities into the local store, unless this search is cached.
     await this.search(buttressQuery, opts);
 
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
-    return this.__filterLocalData(buttressQuery, {
-      limit: opts?.limit,
-      skip: opts?.skip,
-      total,
-      sort: opts?.sort,
-    });
+    const paged = opts?.limit || opts?.skip;
+    const results = paged ? this.__cachedPage(buttressQuery, opts) : this.__filterLocalData(buttressQuery, opts?.sort);
+
+    return { skip: opts?.skip, limit: opts?.limit, total, results };
   }
 
-  private __filterLocalData(
-    buttressQuery: any,
-    opts: { total: number; limit?: number; skip?: number; sort?: SortOpts },
-  ): QueryResult {
-    let data = this._store.get(this.name);
+  // A page can't be cut from the store, which may hold matches the server left off it, so a
+  // page is the entities the server sent, less any since deleted or changed so they don't match.
+  private __cachedPage(buttressQuery: any, opts?: QueryOpts): ButtressEntity[] {
+    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts)) || [];
+    const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
+    // _processQueryPart can reorder the entities ($or does), so keep the server's order.
+    const matching = new Set(this.__matchLocally(buttressQuery, entities));
 
-    // Pirate mode
-    let arr = Array.from(data.values());
+    return entities.filter((entity) => matching.has(entity));
+  }
 
-    if (opts.sort) {
-      arr = arr.sort((a: any, b: any) => this.__sort(a, b, opts.sort as SortOpts));
+  private __filterLocalData(buttressQuery: any, sort?: SortOpts): ButtressEntity[] {
+    let arr = Array.from(this._store.get(this.name).values());
+
+    if (sort) {
+      arr = arr.sort((a: any, b: any) => this.__sort(a, b, sort));
     }
 
+    return this.__matchLocally(buttressQuery, arr);
+  }
+
+  private __matchLocally(buttressQuery: any, entities: any[]): ButtressEntity[] {
     try {
-      data = this._processQueryPart(buttressQuery, arr);
+      return this._processQueryPart(buttressQuery, entities);
     } catch (err) {
-      this._logger.error('Query was:', this.query);
+      this._logger.error('Query was:', buttressQuery);
       throw err;
     }
+  }
 
-    if (opts?.limit) {
-      data = data.splice(opts.skip || 0, opts.limit);
-    }
-
-    return {
-      skip: opts?.skip,
+  private __queryKey(buttressQuery: any, opts?: QueryOpts): string {
+    return JSON.stringify({
+      buttressQuery,
       limit: opts?.limit,
-      total: opts.total,
-      results: data,
-    };
+      skip: opts?.skip,
+      sort: opts?.sort,
+      project: opts?.project,
+    });
   }
 
   private __sort(a: any, b: any, sort: SortOpts): number {
@@ -559,19 +565,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
     if (!this._settings) return undefined;
 
-    // Rules on busting the hash
-    const hash = this._hashQuery({
-      buttressQuery,
-      limit: opts?.limit,
-      skip: opts?.skip,
-      sort: opts?.sort,
-      project: opts?.project,
-    });
-    const hashIdx = this._queryMap.indexOf(`${hash}`);
-    if (opts?.bust && hashIdx !== -1) {
-      this._queryMap.splice(hashIdx, 1);
-    } else if (hashIdx !== -1) {
-      return Promise.resolve(false);
+    const key = this.__queryKey(buttressQuery, opts);
+    if (!opts?.bust && this._queryCache.has(key)) {
+      return false;
     }
 
     let sort: undefined | BJSSortOpt;
@@ -603,7 +599,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
       silent: true,
     });
-    this._queryMap.push(`${hash}`);
+    this._queryCache.set(
+      key,
+      newMapArrMap.map(([id]) => id),
+    );
 
     return body;
   }
@@ -612,22 +611,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return this.__generateCountRequest(buttressQuery, actualCount);
   }
 
-  _hashQuery(object: any) {
-    const str = this.name + JSON.stringify(object);
-
-    let hash = 0;
-    if (str.length === 0) return hash;
-    for (let i = 0; i < str.length; i += 1) {
-      hash = (hash << 5) - hash + str.charCodeAt(i);
-      // hash = hash & hash; // Convert to 32bit integer
-      hash &= hash; // Convert to 32bit integer
-    }
-
-    return hash;
-  }
-
   clearQueryMap() {
-    this._queryMap = [];
+    this._queryCache.clear();
   }
 
   private __updateQueue(): undefined {

@@ -255,21 +255,30 @@ const activeOrLarge = await db.query(
 );
 ```
 
-`$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both, sort
-the results yourself.
+`query()` sends the query to Buttress and merges what comes back into the store, and asks Buttress for the total. How
+it then chooses `results` depends on whether you ask for a page, with `limit` or `skip`.
 
-`query()` sends the query to Buttress and merges what comes back into the store, asks Buttress for the total, then runs
-the same query against the store. As a result:
+**Without `limit` or `skip`,** crag runs the query against everything in the store. So:
 
-- `results` can include matching entities that are only in the store, such as ones you've just created;
+- `results` includes matching entities that are only in the store, such as ones you've just created, and leaves out
+  ones you've changed so they no longer match;
+- `$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both,
+  sort the results yourself.
+
+**With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
+When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
+longer match, so a page can come back shorter than `limit`. New matches don't appear until you pass `bust: true`.
+
+Either way:
+
 - `total` is Buttress's count, so it can differ from `results.length`;
 - running the same query again, with the same `limit`, `skip`, `sort` and `project`, doesn't fetch the entities again
   unless you pass `bust: true`. The total is always requested.
 
 | Option        | Description                                                                        |
 | ------------- | ---------------------------------------------------------------------------------- |
-| `limit`       | Maximum number of results, applied by Buttress and to the local results.           |
-| `skip`        | Number of results to skip, applied the same way.                                   |
+| `limit`       | Maximum number of results, applied by Buttress.                                    |
+| `skip`        | Number of results to skip, applied by Buttress.                                    |
 | `sort`        | `{ path, direction: 'ASC' \| 'DESC', type? }`, where `type` is `STRING` (the default), `NUMBER` or `DATE`. |
 | `project`     | Projection, applied by Buttress.                                                   |
 | `bust`        | Fetches even if this exact query has already run.                                 |
