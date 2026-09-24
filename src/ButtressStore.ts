@@ -18,16 +18,19 @@ import { v4 as uuidv4 } from 'uuid';
 import { Logger, LogLevel } from './Logger.js';
 import { ButtressSchema, ButtressSchemaHelpers } from './ButtressSchema.js';
 
+// ButtressStore and ButtressDataService implement these with different parameters, so they stay loosely typed.
+type StoreMethod = (...args: any[]) => any;
+
 export interface ButtressStoreInterface {
-  get: Function;
-  set: Function;
-  create: Function;
-  delete: Function;
-  push: Function;
-  pushExt: Function;
-  splice: Function;
-  spliceExt: Function;
-  notifyPath: Function;
+  get: StoreMethod;
+  set: StoreMethod;
+  create: StoreMethod;
+  delete: StoreMethod;
+  push: StoreMethod;
+  pushExt: StoreMethod;
+  splice: StoreMethod;
+  spliceExt: StoreMethod;
+  notifyPath: StoreMethod;
 }
 
 export interface ButtressEntity {
@@ -49,9 +52,10 @@ export interface NotifyChangeOpts {
   forceChanged?: boolean;
   silent?: boolean;
   splice?: boolean;
+  // Method syntax, so a Promise's resolve and reject fit whatever the Promise's type is.
   dboComplete?: {
-    resolve: Function;
-    reject: Function;
+    resolve(value?: unknown): void;
+    reject(reason?: unknown): void;
   };
 }
 
@@ -74,7 +78,7 @@ interface Subscription {
     lastRun: number;
     args: Array<PathSig>;
   };
-  cb: Function;
+  cb: CRCallback;
 }
 interface Subscriptions {
   [key: string]: Array<Subscription>;
@@ -152,7 +156,7 @@ export class ButtressStore implements ButtressStoreInterface {
     return change;
   }
 
-  get(path: string, root?: {}): any {
+  get(path: string, root?: unknown): any {
     return ButtressStore.get(path, root || this.__data);
   }
 

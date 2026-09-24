@@ -80,7 +80,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _requestQueue: Array<any> = [];
 
-  private __awaitIdleQueue: Array<Function> = [];
+  private __awaitIdleQueue: Array<(idle: boolean) => void> = [];
 
   status: string = 'pending';
 
@@ -510,7 +510,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
   };
 
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    const fns: { [key: string]: Function } = {
+    // Each operator takes its operand and returns the filter for it (the date ones return false for a null operand).
+    const fns: { [key: string]: (rhs: any) => ((lhs: any) => boolean) | false } = {
       $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
       $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
       $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,

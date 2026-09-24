@@ -95,7 +95,9 @@ export class ButtressSchemaHelpers {
   }
 
   static inflate(schema: ButtressSchema, createId: boolean) {
-    const __inflateObject = (parent: { [index: string]: {} }, path: string[], value: any): { [index: string]: {} } => {
+    type InflatedObject = { [index: string]: unknown };
+
+    const __inflateObject = (parent: InflatedObject, path: string[], value: any): InflatedObject => {
       const parentOut = parent;
       if (path.length > 1) {
         const parentKey = path.shift();
@@ -105,7 +107,7 @@ export class ButtressSchemaHelpers {
           parentOut[parentKey] = {};
         }
 
-        __inflateObject(parentOut[parentKey], path, value);
+        __inflateObject(parentOut[parentKey] as InflatedObject, path, value);
         return parentOut;
       }
 
@@ -120,7 +122,7 @@ export class ButtressSchemaHelpers {
     // type flattenedSchemaKey = keyof typeof flattenedSchema;
 
     const res: { [index: string]: any } = {};
-    const objects: { [index: string]: {} } = {};
+    const objects: { [index: string]: InflatedObject } = {};
     Object.keys(flattenedSchema).forEach((property) => {
       const config = flattenedSchema[property];
       const propVal = {

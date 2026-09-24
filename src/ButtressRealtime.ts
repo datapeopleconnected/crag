@@ -36,7 +36,7 @@ export default class ButtressDataRealtime {
 
   private _socket: any;
 
-  private _dispatchCustomEvent: Function;
+  private _dispatchCustomEvent: (type: string, init: CustomEventInit) => void;
 
   private _loadById: (detail: EventDataDataServiceLoadById) => void;
 
@@ -50,7 +50,7 @@ export default class ButtressDataRealtime {
   constructor(
     store: customButtressStoreInterface,
     settings: Settings,
-    dispatchCustomEvent: Function,
+    dispatchCustomEvent: (type: string, init: CustomEventInit) => void,
     loadById: (detail: EventDataDataServiceLoadById) => void,
   ) {
     this._store = store;

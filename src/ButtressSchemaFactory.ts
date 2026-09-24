@@ -51,7 +51,7 @@ export class ButtressSchemaFactory {
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  static getPropDefault(config: ButtressSchemaProperty): null | string | [] | {} {
+  static getPropDefault(config: ButtressSchemaProperty): unknown {
     let res;
     // 🤨
     switch (config.__type as unknown as string) {
