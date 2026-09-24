@@ -70,8 +70,6 @@
     "@rollup/plugin-replace": "^6.0.1",
     "@types/mocha": "^10.0.9",
     "@types/node": "^22.20.4",
-    "@typescript-eslint/eslint-plugin": "^8.70.1",
-    "@typescript-eslint/parser": "^8.70.1",
     "@web/dev-server": "^1.0.0",
     "@web/dev-server-esbuild": "^2.0.0",
     "@web/dev-server-import-maps": "^0.3.0",
@@ -79,9 +77,8 @@
     "@web/test-runner": "^1.0.0",
     "concurrently": "^8.0.1",
     "esbuild": "^0.28.2",
-    "eslint": "^9.39.5",
+    "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-import-x": "^4.17.1",
     "husky": "^9.1.4",
     "lint-staged": "^13.2.1",
     "postcss-lit": "^1.4.1",
@@ -90,7 +87,8 @@
     "rimraf": "^5.0.10",
     "rollup": "^2.79.2",
     "stylelint": "^17.15.0",
-    "typescript": "^5.0.4"
+    "typescript": "^5.0.4",
+    "typescript-eslint": "^8.70.1"
   },
   "devEngines": {
     "runtime": {

@@ -1,9 +1,6 @@
-import { defineConfig } from "eslint/config";
-import openWC from "@open-wc/eslint-config";
-import tsParser from '@typescript-eslint/parser';
-import tsPlugin from '@typescript-eslint/eslint-plugin';
-
-import importPlugin from 'eslint-plugin-import-x';
+import { defineConfig } from 'eslint/config';
+import openWC from '@open-wc/eslint-config';
+import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
 
 export default defineConfig([
@@ -16,34 +13,21 @@ export default defineConfig([
       'dist/**',
       '.test-bundle/**',
       '.claude/**',
+      'coverage/**',
     ],
   },
+  // Also provides the browser and Mocha globals, and the import-x plugin whose rules are adjusted below.
   ...openWC,
   {
     files: ['src/**/*.{ts,js,mjs,cjs}', 'test/**/*.ts'],
     languageOptions: {
-      parser: tsParser,
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      parserOptions: {
-        ecmaFeatures: {
-          jsx: true,
-        },
-      },
-      globals: {
-        window: 'readonly',
-        document: 'readonly',
-        customElements: 'readonly',
-        HTMLElement: 'readonly',
-      },
+      parser: tseslint.parser,
     },
     plugins: {
-      '@typescript-eslint': tsPlugin,
-      'import-x': importPlugin,
+      '@typescript-eslint': tseslint.plugin,
     },
     rules: {
       'no-unused-vars': 'off',
-      'arrow-parens': ['error', 'always'],
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -60,7 +44,6 @@ export default defineConfig([
       'no-var': 'error',
       'prefer-const': 'error',
       eqeqeq: 'error',
-      quotes: ['error', 'single', { avoidEscape: true }],
     },
   },
   // Must stay last: switches off the formatting rules that would otherwise
