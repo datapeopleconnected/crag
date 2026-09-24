@@ -5,6 +5,9 @@
 ## system files
 .DS_Store
 
+## Claude Code worktrees (also keeps them out of `npm run format`, which reads this file)
+.claude/worktrees/
+
 ## npm
 node_modules/
 npm-debug.log

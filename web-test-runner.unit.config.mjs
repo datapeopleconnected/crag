@@ -1,7 +1,7 @@
 import { importMapsPlugin } from '@web/dev-server-import-maps';
 import { esbuildPlugin } from '@web/dev-server-esbuild';
 
-const filteredLogs = ['Running in dev mode', 'lit-html is in dev mode'];
+const filteredLogs = ['Lit is in dev mode'];
 
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   // Served straight from source: esbuild strips the types and maps the `.js`

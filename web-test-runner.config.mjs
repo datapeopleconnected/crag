@@ -6,7 +6,7 @@ import rollupReplace from "@rollup/plugin-replace";
 
 const replace = fromRollup(rollupReplace);
 
-const filteredLogs = ['Running in dev mode', 'lit-html is in dev mode'];
+const filteredLogs = ['Lit is in dev mode'];
 
 // scripts/e2e.js starts and seeds a Buttress for the run, then passes in its endpoint and tokens.
 const env = process.env;

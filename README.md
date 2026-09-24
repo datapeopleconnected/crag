@@ -381,7 +381,8 @@ when you exit it.
 
 ### Commits and publishing
 
-The pre-commit hook runs `npm run build` and `npm run licence-check`. Every file in `src/`, `test/` and `scripts/`,
+The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with ESLint and Prettier, then
+`npm run build` and `npm run licence-check`. Every file in `src/`, `test/` and `scripts/`,
 apart from HTML and JSON, must start with the header in `.husky/licencing_header.txt`.
 
 `npm pack` and `npm publish` build the package first. Run `npm run publint` beforehand to check its exports and types.

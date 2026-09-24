@@ -72,6 +72,7 @@
     "@types/node": "^22.20.4",
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
+    "@web/dev-server": "^0.4.6",
     "@web/dev-server-esbuild": "^1.0.2",
     "@web/dev-server-import-maps": "^0.2.1",
     "@web/dev-server-rollup": "^0.6.4",
@@ -96,11 +97,6 @@
       "name": "node",
       "version": ">=24",
       "onFail": "error"
-    }
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
     }
   },
   "lint-staged": {
