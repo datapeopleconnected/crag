@@ -1,3 +1,4 @@
+import { importMapsPlugin } from '@web/dev-server-import-maps';
 // import { hmrPlugin, presets } from '@open-wc/dev-server-hmr';
 
 /** Use Hot Module replacement by adding --hmr to the start command */
@@ -20,6 +21,15 @@ export default /** @type {import('@web/dev-server').DevServerConfig} */ ({
   // appIndex: 'demo/index.html',
 
   plugins: [
+    // socket.io-parser >=4.2.7 maps the 'development' condition above to a debug build that imports
+    // the CommonJS `debug` package, which browsers can't load. Same override as the unit test config.
+    importMapsPlugin({
+      inject: {
+        importMap: {
+          imports: { 'socket.io-parser': '/node_modules/socket.io-parser/build/esm/index.js' },
+        },
+      },
+    }),
     /** Use Hot Module Replacement by uncommenting. Requires @open-wc/dev-server-hmr plugin */
     // hmr && hmrPlugin({ exclude: ['**/*/node_modules/**/*'], presets: [presets.litElement] }),
   ],
