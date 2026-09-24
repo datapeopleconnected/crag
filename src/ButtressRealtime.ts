@@ -36,17 +36,16 @@ export default class ButtressDataRealtime {
 
   private _socket: any;
 
-  private _synced: boolean = false;
-
-  private _lastSequence: { [key: string]: number } = {};
-
   private _dispatchCustomEvent: Function;
 
   private _loadById: (detail: EventDataDataServiceLoadById) => void;
 
   private _isConnected: boolean = false;
 
-  private readonly _rxEvents: string[] = ['db-activity', 'clear-local-db', 'db-connect-room', 'db-disconnect-room'];
+  // Survives replacing the socket: updates sent while this instance had no connection are lost either way.
+  private _hasConnected: boolean = false;
+
+  private readonly _rxEvents: string[] = ['db-activity'];
 
   constructor(
     store: customButtressStoreInterface,
@@ -68,7 +67,7 @@ export default class ButtressDataRealtime {
       throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
     }
     if (!this._settings?.token) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect`);
+      throw new Error(`Missing setting 'token' while trying to connect`);
     }
 
     const uri = this._settings?.apiPath
@@ -125,6 +124,19 @@ export default class ButtressDataRealtime {
 
   private _onConnected() {
     this._connected = true;
+    if (this._hasConnected) this._resync();
+    this._hasConnected = true;
+  }
+
+  // Buttress can't replay the updates sent while there was no connection, so cached queries are
+  // searched for again, and the app is told so it can reload what it's showing.
+  private _resync() {
+    this._logger.debug(`Resyncing after a reconnection`);
+    this._store.clearQueryMaps();
+    this._dispatchCustomEvent('bjs-resync', {
+      bubbles: true,
+      composed: true,
+    });
   }
 
   private _onDisconnected() {
@@ -143,68 +155,16 @@ export default class ButtressDataRealtime {
 
   private _handleRxEvent(type: string, payload: any) {
     this._logger.debug(`RX Event type:${type} `, payload);
-    if (type === 'db-connect-room') {
-      this._loadAccessControlData(payload);
-    } else if (type === 'db-disconnect-room') {
-      this._clearAccessControlQueryHash(payload);
-    } else if (type === 'clear-local-db') {
-      // this._clearUserLocaldata(data);
-      // Do stuff
-    } else if (type === 'db-activity') {
-      // Do stuff
+    if (type === 'db-activity') {
       this._dbActivity(payload);
-    } else {
-      // Log out somthing
     }
   }
 
   private _dbActivity(payload: any) {
-    const lastSequence = this._lastSequence[payload.room];
-
-    if (lastSequence) {
-      if (lastSequence === payload.sequence) {
-        this._synced = false;
-      }
-      if (lastSequence + 1 !== payload.sequence) {
-        this._synced = false;
-      }
-    }
-
-    if (this._settings.clientSessionId !== payload.data.clientSessionId || payload.isSameApp === false) {
+    // Skip our own changes, which are already in the store, but not ones shared from another app.
+    if (this._settings.clientSessionId !== payload.data.clientSessionId || payload.data.isSameApp === false) {
       this._parsePayload(payload.data);
     }
-
-    this._lastSequence[payload.room] = payload.sequence;
-  }
-
-  private async _loadAccessControlData(payload: any) {
-    const userId = this._settings?.userId;
-    const apiPath = this._settings?.apiPath;
-    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
-
-    const { collections } = payload;
-    if (!collections || (collections && collections.length < 1)) return;
-
-    for await (const collection of collections) {
-      this._store.notifyPath(collection, undefined, { forceChanged: true });
-    }
-
-    this._lastSequence[payload.room] = 0;
-  }
-
-  private async _clearAccessControlQueryHash(payload: any) {
-    const userId = this._settings?.userId;
-    const apiPath = this._settings?.apiPath;
-    if (userId !== payload.userId || payload.apiPath !== apiPath) return;
-
-    const { collections } = payload;
-    if (!collections || (collections && collections.length < 1)) return;
-
-    for await (const collection of collections) {
-      this._store.clearQueryMap(collection);
-    }
-
-    this._lastSequence[payload.room] = 0;
   }
 
   private _parsePayload(data: any) {

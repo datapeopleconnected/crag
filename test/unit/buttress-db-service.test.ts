@@ -287,3 +287,20 @@ describe('ButtressDbService connect', () => {
     expect(realtimeConnects()).to.equal(1);
   });
 });
+
+describe('ButtressDbService resync', () => {
+  it('clears the query cache of every data service', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+    const cleared: string[] = [];
+    (el as any)._dataServices = {
+      organisation: { clearQueryMap: () => cleared.push('organisation') },
+      person: { clearQueryMap: () => cleared.push('person') },
+    };
+
+    (el as any)._dsStoreInterface.clearQueryMaps();
+
+    expect(cleared).to.deep.equal(['organisation', 'person']);
+  });
+});

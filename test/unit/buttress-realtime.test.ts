@@ -94,4 +94,111 @@ describe('ButtressRealtime', () => {
 
     expect(created).to.deep.equal([['organisation', { id: 'org1', name: 'New' }, { localOnly: true }]]);
   });
+
+  describe('resync', () => {
+    const setup = () => {
+      const calls: string[] = [];
+      const store = { clearQueryMaps: () => calls.push('clearQueryMaps') };
+      const settings = buildSettings({});
+      settings.endpoint = 'http://127.0.0.1:1';
+      settings.token = 'abc';
+      const realtime = new ButtressRealtime(
+        store as any,
+        settings,
+        (type: string) => calls.push(type),
+        () => {},
+      );
+      const connected = () => (realtime as any)._onConnected();
+      return { realtime, calls, connected, resyncs: () => calls.filter((c) => c === 'bjs-resync').length };
+    };
+
+    it('does not resync on the first connection', () => {
+      const { realtime, connected, resyncs } = setup();
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(0);
+      realtime.disconnect();
+    });
+
+    it('clears the query caches, then dispatches bjs-resync, on a reconnection', () => {
+      const { realtime, calls, connected, resyncs } = setup();
+      realtime.connect();
+      connected();
+
+      calls.length = 0;
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      expect(calls.indexOf('clearQueryMaps')).to.be.lessThan(calls.indexOf('bjs-resync'));
+      realtime.disconnect();
+    });
+
+    it('resyncs when a new socket connects after the old one was closed', () => {
+      const { realtime, connected, resyncs } = setup();
+      realtime.connect();
+      connected();
+      realtime.disconnect();
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      realtime.disconnect();
+    });
+  });
+
+  it('names the token when the token is missing', () => {
+    const settings = buildSettings({});
+    settings.endpoint = 'http://127.0.0.1:1';
+    const realtime = new ButtressRealtime(
+      {} as any,
+      settings,
+      () => {},
+      () => {},
+    );
+
+    expect(() => realtime.connect()).to.throw(/'token'/);
+  });
+
+  describe('db-activity', () => {
+    const setup = () => {
+      const settings = buildSettings({});
+      const realtime = new ButtressRealtime(
+        {} as any,
+        settings,
+        () => {},
+        () => {},
+      );
+      const applied: unknown[] = [];
+      (realtime as any)._parsePayload = (data: unknown) => applied.push(data);
+      const receive = (data: object) => (realtime as any)._handleRxEvent('db-activity', { time: '', data });
+      return { settings, applied, receive };
+    };
+
+    it('skips updates from its own session', () => {
+      const { settings, applied, receive } = setup();
+
+      receive({ clientSessionId: settings.clientSessionId, isSameApp: true });
+
+      expect(applied.length).to.equal(0);
+    });
+
+    it('applies updates from another session', () => {
+      const { applied, receive } = setup();
+
+      receive({ clientSessionId: 'someone-else' });
+
+      expect(applied.length).to.equal(1);
+    });
+
+    it('applies updates shared from another app, whatever their session id', () => {
+      const { settings, applied, receive } = setup();
+
+      receive({ clientSessionId: settings.clientSessionId, isSameApp: false });
+
+      expect(applied.length).to.equal(1);
+    });
+  });
 });

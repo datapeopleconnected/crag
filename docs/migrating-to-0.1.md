@@ -227,7 +227,8 @@ realtime updates whose `data.clientSessionId` matches.
   doesn't, crag applies its own changes a second time when they come back.
 - Two tabs, or two elements, signed in as the same user now see each other's changes in real time. Before, they
   skipped them because the `userId` matched.
-- `userId` is still used for access-control updates, so keep setting it.
+- crag no longer uses `userId` itself. It used to refresh schemas when Buttress sent an access-control update for that
+  user, but Buttress no longer sends those updates. You can still set it and read it back with `getUserId()`.
 - If you build a `Settings` object in TypeScript, it now needs a `clientSessionId` string, such as one from
   `crypto.randomUUID()`.
 
@@ -251,6 +252,9 @@ realtime updates whose `data.clientSessionId` matches.
 - **Missing entities are fetched once.** When a realtime update arrives for an entity that isn't in the store, crag
   fetches it. Previously a handler for this was added every time the element connected and never removed, so after the
   element had been attached N times, each of these updates caused N fetches.
+- **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
+  connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
+  reload what you're showing. Entities already in the store keep their values until a query fetches them again.
 - **`nextIdle()` waits for requests that have been sent.** It used to resolve once nothing was queued, even while a
   request was still waiting for a response, so with a single write it resolved straight away. It now resolves once
   Buttress has responded to every request, including any queued while it waits.

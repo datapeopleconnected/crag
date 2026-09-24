@@ -120,7 +120,7 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `endpoint`    | `endpoint`   | Base URL of the Buttress server. Required by `connect()`.                                                                                                   |
 | `token`       | `token`      | Token sent with every request and used to open the realtime socket. Required.                                                                               |
 | `api-path`    | `apiPath`    | Your app's API path on the server. Required.                                                                                                                |
-| `userid`      | `userId`     | Id of the signed-in user. When Buttress sends an access-control update for this user, crag refreshes the affected schemas: it either notifies their subscribers or clears their cached queries. |
+| `userid`      | `userId`     | Id of the signed-in user, returned by `getUserId()`. crag doesn't use it itself. |
 | `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names lose a trailing `s`: `users` becomes `user`.              |
 | `loglevel`    | `logLevel`   | `error`, `warn`, `info` (the default), `debug` or `sys`. Applies to the element, the store, the data services and the realtime connection.                  |
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
@@ -313,6 +313,7 @@ Both events bubble and cross shadow roots.
 | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`).        |
 | `dataservice:loadById`   | `{ schemaName, id }` | When a realtime update arrives for an entity that isn't in the store. crag fetches the entity itself; the event is for information. |
+| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
 
 ```ts
 db.addEventListener('bjs-connection-changed', (e) => {
