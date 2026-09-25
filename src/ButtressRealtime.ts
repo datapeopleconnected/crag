@@ -277,13 +277,10 @@ export default class ButtressDataRealtime {
     for (let x = 0; x < responses.length; x += 1) {
       const existing = this._store.get(`${schemaName}.${responses[x].id}`);
       if (existing) {
-        this._store.set(
-          `${schemaName}.${responses[x].id}`,
-          { ...existing, ...responses[x] },
-          {
-            localOnly: true,
-          },
-        );
+        // Merged in place, so anything holding the entity sees the update.
+        this._store.set(`${schemaName}.${responses[x].id}`, Object.assign(existing, responses[x]), {
+          localOnly: true,
+        });
         continue;
       }
       // Through create() so the data service knows its cached pages may be missing it.

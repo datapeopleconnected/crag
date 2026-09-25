@@ -170,7 +170,12 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const existing = this._store.get(`${this.name}.${id}`);
-    const setPath = this._store.set(`${this.name}.${id}`, value, ButtressDataService.__storeOpts(opts));
+    // The object already in the store can only have changed in place, which the store can't see for itself.
+    const storeOpts =
+      existing && value === existing
+        ? { ...ButtressDataService.__storeOpts(opts), forceChanged: true }
+        : ButtressDataService.__storeOpts(opts);
+    const setPath = this._store.set(`${this.name}.${id}`, value, storeOpts);
 
     if (!existing) {
       this.__pageGeneration += 1;
@@ -282,7 +287,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     const entity = await this.__generateGetByIdRequest(id);
 
-    if (this._store.get(`${this.name}.${entity.id}`)) return entity;
+    // If it reached the store while the request was out, anything else holding it holds the store's object.
+    const arrived = this._store.get(`${this.name}.${entity.id}`);
+    if (arrived) return arrived;
 
     this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
       silent: true,
@@ -522,29 +529,23 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
-    // Filter out any objects which exists in the local store
-    // const filteredBody =body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
-    const newMapArrMap: [string, ButtressEntity][] = [];
-
+    const entities: Map<string, ButtressEntity> = this.get(this.name);
+    const added: Map<string, ButtressEntity> = new Map();
     for (const o of body) {
-      const idx = newMapArrMap.findIndex((n) => n[0] === o.id);
-      if (idx !== -1) {
-        newMapArrMap[idx] = [o.id, { ...newMapArrMap[idx][1], ...o }];
-        continue;
+      // Merged into the object already in the store, so anything holding it sees the fresh values.
+      const held = added.get(o.id) ?? entities.get(o.id);
+      if (held) {
+        Object.assign(held, o);
+      } else {
+        added.set(o.id, o);
       }
-      const existing = this._store.get(`${this.name}.${o.id}`);
-      if (!existing) {
-        newMapArrMap.push([o.id, o]);
-        continue;
-      }
-      newMapArrMap.push([o.id, { ...existing, ...o }]);
     }
 
-    this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
+    this._store.set(this.name, new Map([...entities, ...added]), {
       silent: true,
     });
     // The generation from when the search was sent, so a create while it was out makes this page stale.
-    this._queryCache.set(key, { ids: newMapArrMap.map(([id]) => id), paged, generation });
+    this._queryCache.set(key, { ids: [...new Set(body.map((o) => o.id))], paged, generation });
 
     return body;
   }

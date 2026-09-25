@@ -1039,12 +1039,13 @@ describe('ButtressDataService getById', () => {
     expect(gets).to.equal(0);
   });
 
-  it('keeps the entity in the store if one arrived while fetching', async () => {
+  it('keeps, and returns, the entity that reached the store while fetching', async () => {
     const ds = dataService();
-    onGet = () => ds.get('organisation').set('x', { id: 'x', name: 'local' });
+    const local = { id: 'x', name: 'local' };
+    onGet = () => ds.get('organisation').set('x', local);
 
-    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'from server' });
-    expect(ds.get('organisation.x')).to.deep.equal({ id: 'x', name: 'local' });
+    expect(await ds.getById('x')).to.equal(local);
+    expect(ds.get('organisation.x')).to.equal(local);
   });
 });
 

@@ -847,6 +847,62 @@ describe('ButtressDbService API', () => {
     expect(el.unsubscribe(id)).to.equal(false);
   });
 
+  describe('an entity held from a query', () => {
+    const held = async (el: ButtressDbService) => {
+      respond = (path) => (path.endsWith('/count') ? 1 : [{ id: 'x', name: 'a' }]);
+      const { results } = await el.query('organisation', { name: { $eq: 'a' } });
+      return results[0];
+    };
+
+    it('is still the entity in the store after a later search returns it, with the fresh values', async () => {
+      const el = await connected();
+      const entity = await held(el);
+      // Partial, as a projected search returns them, and twice.
+      respond = (path) =>
+        path.endsWith('/count')
+          ? 1
+          : [
+              { id: 'x', name: 'b' },
+              { id: 'x', status: 'new' },
+            ];
+
+      const { results } = await el.query('organisation', {});
+      el.set('organisation.x.name', 'c', { localOnly: true });
+
+      expect(results[0]).to.equal(entity);
+      expect(el.get('organisation.x')).to.equal(entity);
+      expect(entity).to.deep.equal({ id: 'x', name: 'c', tags: ['a', 'b'], status: 'new' });
+    });
+
+    it('is still the entity in the store after a realtime post for it, with the fresh values', async () => {
+      const el = await connected();
+      const entity = await held(el);
+      const notified: unknown[] = [];
+      el.subscribe('organisation.x', (cr: unknown) => notified.push(cr));
+
+      (el as any)._realtime._handlePost('organisation', { id: 'x', name: 'b' });
+      await el.nextIdle('organisation');
+
+      expect(el.get('organisation.x')).to.equal(entity);
+      expect(entity).to.deep.equal({ id: 'x', name: 'b', tags: ['a', 'b'] });
+      expect(notified).to.deep.equal([{ value: entity, opts: { localOnly: true, forceChanged: true } }]);
+    });
+  });
+
+  it('notifies subscribers, but sends nothing, for a set of an entity changed in place', async () => {
+    const el = await connected();
+    const entity = el.get('organisation.x')!;
+    const values: unknown[] = [];
+    el.subscribe('organisation.x.name', (cr: { value: unknown }) => values.push(cr.value));
+
+    entity.name = 'b';
+    el.set('organisation.x', entity);
+    await el.nextIdle('organisation');
+
+    expect(values).to.deep.equal(['b']);
+    expect(sent).to.deep.equal([]);
+  });
+
   it('creates a blank object from a schema', async () => {
     const el = await connected();
 
