@@ -1134,3 +1134,96 @@ describe('ButtressDataService query operators', () => {
     expect(logged).to.have.length(1);
   });
 });
+
+// A path into an array matches if any value it reaches does. Each path to an identifier here passes through two
+// arrays: the signatories, and the identifiers of each signatory's person.
+describe('ButtressDataService query operators on nested arrays', () => {
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const identifier = (name: string, age: number, hired: string) => ({ name, age, hired_at: new Date(hired) });
+  const data = [
+    {
+      id: 'first',
+      threshold: 1,
+      signatories: [
+        { person: { identifiers: [identifier('John', 30, '2010-01-10'), identifier('Mary', 20, '2020-07-04')] } },
+      ],
+    },
+    {
+      id: 'second',
+      threshold: 2,
+      signatories: [
+        { person: { identifiers: [identifier('Henry', 50, '2023-10-31')] } },
+        { person: { identifiers: [identifier('James', 60, '2009-03-14')] } },
+      ],
+    },
+    {
+      id: 'third',
+      threshold: 1,
+      signatories: [
+        { person: { identifiers: [{ ...identifier('Anna', 40, '2015-06-01'), email: 'anna@example.com' }] } },
+      ],
+    },
+  ];
+  const identifiers = 'signatories.person.identifiers';
+  const name = `${identifiers}.name`;
+  const age = `${identifiers}.age`;
+  const hiredAt = `${identifiers}.hired_at`;
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  it('matches $eq against a value outside the arrays', () => {
+    expect(ids({ threshold: { $eq: 1 } })).to.deep.equal(['first', 'third']);
+  });
+
+  it('matches $eq against any value in the arrays', () => {
+    expect(ids({ [name]: { $eq: 'James' } })).to.deep.equal(['second']);
+  });
+
+  // So an entity with John and Mary matches $not John. $nin, below, needs every value to differ.
+  it('matches $not when any value differs', () => {
+    expect(ids({ threshold: { $not: 1 } })).to.deep.equal(['second']);
+    expect(ids({ [name]: { $not: 'Anna' } })).to.deep.equal(['first', 'second']);
+    expect(ids({ [name]: { $not: 'John' } })).to.deep.equal(['first', 'second', 'third']);
+  });
+
+  it('matches $gt and $lt against any value in the arrays', () => {
+    expect(ids({ [age]: { $gt: 45 } })).to.deep.equal(['second']);
+    expect(ids({ [age]: { $lt: 25 } })).to.deep.equal(['first']);
+    expect(ids({ [age]: { $gt: 100 } })).to.deep.equal([]);
+  });
+
+  it('matches $gte and $lte against any value in the arrays, including the value itself', () => {
+    expect(ids({ [age]: { $gte: 40 } })).to.deep.equal(['second', 'third']);
+    expect(ids({ [age]: { $lte: 20 } })).to.deep.equal(['first']);
+  });
+
+  it('matches $rex with regard to case, and $rexi without', () => {
+    expect(ids({ [name]: { $rex: 'ry' } })).to.deep.equal(['first', 'second']);
+    expect(ids({ [name]: { $rex: '^j' } })).to.deep.equal([]);
+    expect(ids({ [name]: { $rexi: '^j' } })).to.deep.equal(['first', 'second']);
+  });
+
+  it('matches $in when any value is in the list', () => {
+    expect(ids({ [name]: { $in: ['Mary', 'Anna'] } })).to.deep.equal(['first', 'third']);
+  });
+
+  it('matches $nin only when no value is in the list', () => {
+    expect(ids({ [name]: { $nin: ['Mary', 'James'] } })).to.deep.equal(['third']);
+    expect(ids({ [name]: { $nin: ['Zoe'] } })).to.deep.equal(['first', 'second', 'third']);
+  });
+
+  it('matches $exists when any item in the arrays has the property', () => {
+    expect(ids({ [`${identifiers}.email`]: { $exists: true } })).to.deep.equal(['third']);
+    expect(ids({ [`${identifiers}.email`]: { $exists: false } })).to.deep.equal(['first', 'second']);
+  });
+
+  it('matches $elMatch only when a single item meets every condition', () => {
+    expect(ids({ [identifiers]: { $elMatch: { name: { $eq: 'John' }, age: { $lt: 40 } } } })).to.deep.equal(['first']);
+    // Mary is under 25, but she isn't John.
+    expect(ids({ [identifiers]: { $elMatch: { name: { $eq: 'John' }, age: { $lt: 25 } } } })).to.deep.equal([]);
+  });
+
+  it('matches $gtDate and $ltDate against any date in the arrays', () => {
+    expect(ids({ [hiredAt]: { $gtDate: '2022-01-01T00:00:00.000Z' } })).to.deep.equal(['second']);
+    expect(ids({ [hiredAt]: { $ltDate: '2012-01-01T00:00:00.000Z' } })).to.deep.equal(['first', 'second']);
+  });
+});
