@@ -16,11 +16,12 @@
 
 import { expect } from '@open-wc/testing';
 
-import type { ButtressClient } from '../../src/ButtressClient.js';
+import { ButtressError, type ButtressClient } from '../../src/ButtressClient.js';
 import { ButtressRequestQueue, QueuedRequest } from '../../src/ButtressRequestQueue.js';
 import { Logger } from '../../src/Logger.js';
 
-// Records what the queue sends, and holds the first request open until release() so the rest queue up behind it.
+// Records what the queue sends, and holds the first request open until release() so the rest queue up behind it. It
+// answers a bulk request with an entry for each item, as Buttress answers a bulk update.
 const fakeClient = () => {
   const sent: string[] = [];
   let release!: () => void;
@@ -32,7 +33,7 @@ const fakeClient = () => {
       const label = url === 'bulk' ? `${method} bulk ${JSON.stringify(opts.body)}` : `${method} ${url}`;
       sent.push(label);
       if (sent.length === 1) await held;
-      return {};
+      return url === 'bulk' ? (opts.body as unknown[]).map(() => ({ results: [] })) : {};
     },
   };
   return { client: client as unknown as ButtressClient, sent, release };
@@ -162,6 +163,162 @@ describe('ButtressRequestQueue', () => {
     await Promise.all(done);
 
     expect(bodies[1]).to.deep.equal({ id: 'x', tags: ['a'] });
+  });
+
+  describe('bulk responses', () => {
+    let originalError: typeof console.error;
+
+    beforeEach(() => {
+      originalError = console.error;
+      // The queue logs each request that fails.
+      console.error = () => {};
+    });
+
+    afterEach(() => {
+      console.error = originalError;
+    });
+
+    // Like fakeClient, with the response to each request from `respond`, which can also throw.
+    const respondingClient = (respond: (method: string, url: string, body: unknown) => unknown) => {
+      const sent: string[] = [];
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const client = {
+        request: async (method: string, url: string, opts: { body?: unknown }) => {
+          sent.push(url === 'bulk' ? `${method} bulk ${JSON.stringify(opts.body)}` : `${method} ${url}`);
+          if (sent.length === 1) await held;
+          return respond(method, url, opts.body);
+        },
+      };
+      const queue = new ButtressRequestQueue(client as unknown as ButtressClient, () => 'bulk', new Logger('test'));
+      return { queue, sent, release };
+    };
+    const outcome = (request: Promise<unknown>) =>
+      request.then(
+        () => 'resolved',
+        (err: ButtressError) => `${err.status} ${err.serverMessage}`,
+      );
+
+    // Buttress answers a bulk update with an entry for each update, in the order sent.
+    it('settles each bundled update from its own entry', async () => {
+      const entries: Record<string, object> = {
+        applied: { results: [{ type: 'scalar' }] },
+        refused: { results: null, validation: { code: 400, message: 'organisation: Invalid ID: b' } },
+        valid: { results: [{ type: 'scalar' }], validation: true },
+        refusedWithResults: { results: [], validation: { code: 400, message: 'organisation: refused' } },
+        unexplained: { results: null },
+      };
+      const { queue, release } = respondingClient((_method, url, body) =>
+        url === 'bulk' ? (body as { id: string; body: string }[]).map((u) => ({ id: u.id, ...entries[u.body] })) : {},
+      );
+
+      const outcomes = [
+        search(),
+        update('a', 'applied'),
+        update('b', 'refused'),
+        update('a', 'valid'),
+        update('c', 'refusedWithResults'),
+        update('d', 'unexplained'),
+      ].map((r) => outcome(queue.push(r)));
+      release();
+
+      expect(await Promise.all(outcomes)).to.deep.equal([
+        'resolved',
+        'resolved',
+        '400 organisation: Invalid ID: b',
+        'resolved',
+        '400 organisation: refused',
+        "500 Buttress didn't apply the update",
+      ]);
+    });
+
+    // As from a Buttress older than crag supports, which merged the updates to each entity into one entry.
+    for (const [shape, response] of Object.entries({
+      'not a list': {},
+      'too short': [{ results: [] }],
+      'not of entries': [null, 'x'],
+    })) {
+      it(`rejects every bundled update when the response is ${shape}`, async () => {
+        const { queue, release } = respondingClient((_method, url) => (url === 'bulk' ? response : {}));
+
+        const outcomes = [search(), update('a'), update('b')].map((r) =>
+          queue.push(r).then(
+            () => 'resolved',
+            (err: Error) => err.message,
+          ),
+        );
+        release();
+        const [searched, ...updates] = await Promise.all(outcomes);
+
+        expect(searched).to.equal('resolved');
+        expect(updates).to.have.length(2);
+        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 3f044191/));
+      });
+    }
+
+    it('rejects every bundled update when the bulk update fails', async () => {
+      const { queue, release } = respondingClient((_method, url) => {
+        if (url === 'bulk') throw new ButtressError(500, 'POST', url, 'Internal Server Error');
+        return {};
+      });
+
+      const outcomes = [search(), update('a'), update('b')].map((r) => outcome(queue.push(r)));
+      release();
+
+      expect(await Promise.all(outcomes)).to.deep.equal([
+        'resolved',
+        '500 Internal Server Error',
+        '500 Internal Server Error',
+      ]);
+    });
+
+    // Buttress stores none of a bulk add if one is invalid, and names only the first.
+    it('sends each create in a bulk add Buttress refused on its own, ahead of what was queued after it', async () => {
+      const { queue, sent, release } = respondingClient((_method, url, body) => {
+        if (url === 'bulk') throw new ButtressError(400, 'POST', url, 'organisation: Missing field: name at index 1');
+        if (body === 'bad') throw new ButtressError(400, 'POST', url, 'organisation: Missing field: name');
+        return {};
+      });
+
+      // The update to a waits for a's create, which is sent again.
+      const outcomes = [search(), add('a'), add('bad'), add('c'), update('a')].map((r) => outcome(queue.push(r)));
+      release();
+
+      expect(await Promise.all(outcomes)).to.deep.equal([
+        'resolved',
+        'resolved',
+        '400 organisation: Missing field: name',
+        'resolved',
+        'resolved',
+      ]);
+      expect(sent).to.deep.equal([
+        'SEARCH search',
+        'POST bulk ["a","bad","c"]',
+        'POST add a',
+        'POST add bad',
+        'POST add c',
+        'PUT update a',
+      ]);
+    });
+
+    it('rejects every create in a bulk add that fails with no response', async () => {
+      const { queue, release } = respondingClient((_method, url) => {
+        if (url === 'bulk') throw new TypeError('Failed to fetch');
+        return {};
+      });
+
+      const outcomes = [search(), add('a'), add('b')].map((r) =>
+        queue.push(r).then(
+          () => 'resolved',
+          (err: Error) => err.message,
+        ),
+      );
+      release();
+
+      expect(await Promise.all(outcomes)).to.deep.equal(['resolved', 'Failed to fetch', 'Failed to fetch']);
+    });
   });
 
   it('bundles adds that do not name their entity', async () => {

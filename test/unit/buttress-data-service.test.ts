@@ -259,11 +259,11 @@ describe('ButtressDataService queued request bodies', () => {
     sent = [];
     Logger.disableLogging = true;
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      sent.push({
-        method: init!.method!,
-        path: new URL(input.toString()).pathname.replace('/api/v1/organisation', ''),
-        body: init?.body ? JSON.parse(init.body as string) : undefined,
-      });
+      const path = new URL(input.toString()).pathname.replace('/api/v1/organisation', '');
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({ method: init!.method!, path, body });
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (path === '/bulk/update') return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
       return new Response('{}');
     };
   });
@@ -349,6 +349,8 @@ describe('ButtressDataService query', () => {
         server.push(body);
         return new Response(JSON.stringify(body));
       }
+      // Answered for each update, as Buttress does, without applying them.
+      if (url.pathname.endsWith('/bulk/update')) return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
       if (init?.method === 'SEARCH') {
         searches += 1;
         await holdSearches;
@@ -721,11 +723,12 @@ describe('ButtressDataService writes', () => {
     Logger.disableLogging = true;
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
-      sent.push({
-        method: init!.method!,
-        path: new URL(input.toString()).pathname.replace('/api/v1/organisation', ''),
-        body,
-      });
+      const path = new URL(input.toString()).pathname.replace('/api/v1/organisation', '');
+      sent.push({ method: init!.method!, path, body });
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (status === 200 && path === '/bulk/update') {
+        return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
+      }
       return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
     };
   });

@@ -83,7 +83,9 @@ customElements.define('organisation-list', OrganisationList);
 - Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
   loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
 - Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a
-  time, and additions and updates are combined into bulk requests of up to 100.
+  time, and additions and updates are combined into bulk requests of up to 100. Each write in one still succeeds or
+  fails on its own: Buttress answers a bulk update for each update in it, and a bulk add it refuses, because one of the
+  entities is invalid, is sent again one create at a time.
 - Changes made by other clients arrive over the realtime socket and are applied to the store. Each
   `<buttress-db-service>` has its own session id, so crag ignores realtime messages about its own changes.
 - `subscribe()` calls you back when paths in the store change.

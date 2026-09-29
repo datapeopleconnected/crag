@@ -519,10 +519,15 @@ describe('ButtressDbService wait', () => {
     status = 200;
     holdWrites = undefined;
     writes = 0;
-    window.fetch = async (input: RequestInfo | URL) => {
-      if (new URL(input.toString()).pathname.endsWith('/app/schema')) return new Response(JSON.stringify(schemas));
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { pathname } = new URL(input.toString());
+      if (pathname.endsWith('/app/schema')) return new Response(JSON.stringify(schemas));
       writes += 1;
       await holdWrites;
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (status === 200 && pathname.endsWith('/bulk/update')) {
+        return new Response(JSON.stringify(JSON.parse(init!.body as string).map(() => ({ results: [] }))));
+      }
       return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
     };
   });
@@ -719,6 +724,116 @@ describe('ButtressDbService wait', () => {
     console.error = originalError;
 
     expect(rejected).to.be.instanceOf(ButtressError);
+  });
+});
+
+// Writes waiting at the same time go to Buttress as one bulk request, which it answers for each write.
+describe('ButtressDbService bundled writes', () => {
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+  let release: () => void;
+  let writes: number;
+
+  const schemas = [
+    {
+      name: 'organisation',
+      type: 'collection',
+      properties: { name: { __type: 'string' }, status: { __type: 'string' } },
+    },
+  ];
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    // The queue logs each refused write.
+    console.error = () => {};
+    writes = 0;
+    // Pretends to be Buttress: refuses a status of 'invalid', and a create without a name.
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const route = new URL(input.toString()).pathname.replace(/^(\/app)?\/api\/v1\//, '');
+      if (route === 'app/schema') return json(schemas);
+      writes += 1;
+      // Holds the first write, so the ones after it wait and are bundled.
+      if (writes === 1) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      const body = JSON.parse(init!.body as string);
+      if (route === 'organisation/bulk/update') {
+        return json(
+          body.map((u: { id: string; body: { value: unknown } }) =>
+            u.body.value === 'invalid'
+              ? { id: u.id, results: null, validation: { code: 400, message: 'organisation: Invalid value: status' } }
+              : { id: u.id, results: [u.body] },
+          ),
+        );
+      }
+      if (route === 'organisation/bulk/add') {
+        const invalid = body.findIndex((entity: { name: string }) => !entity.name);
+        if (invalid !== -1) return json({ message: `organisation: Missing field: name at index ${invalid}` }, 400);
+      }
+      if (route === 'organisation/' && !body.name) return json({ message: 'organisation: Missing field: name' }, 400);
+      return json(body);
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  const connected = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    el.create('organisation', { id: 'x', name: 'a', status: 'new' }, { localOnly: true });
+    el.create('organisation', { id: 'y', name: 'b', status: 'new' }, { localOnly: true });
+    return el;
+  };
+  const outcome = (write: Promise<unknown>) =>
+    write.then(
+      () => 'resolved',
+      (err: ButtressError) => `${err.status} ${err.serverMessage}`,
+    );
+
+  it('rejects, with wait, only the update in a bundle that Buttress refused', async () => {
+    const el = await connected();
+
+    const outcomes = [
+      el.set('organisation.x.name', 'first', { wait: true }),
+      el.set('organisation.x.status', 'invalid', { wait: true }),
+      el.set('organisation.y.name', 'c', { wait: true }),
+    ].map(outcome);
+    release();
+
+    expect(await Promise.all(outcomes)).to.deep.equal([
+      'resolved',
+      '400 organisation: Invalid value: status',
+      'resolved',
+    ]);
+  });
+
+  it('saves, with wait, the valid creates in a bulk add that Buttress refused, and rejects the invalid one', async () => {
+    const el = await connected();
+
+    const outcomes = [
+      el.set('organisation.x.name', 'first', { wait: true }),
+      el.create('organisation', { id: 'a1', name: 'A' }, { wait: true }),
+      el.create('organisation', { id: 'b1', name: '' }, { wait: true }),
+      el.create('organisation', { id: 'c1', name: 'C' }, { wait: true }),
+    ].map(outcome);
+    release();
+
+    expect(await Promise.all(outcomes)).to.deep.equal([
+      'resolved',
+      'resolved',
+      '400 organisation: Missing field: name',
+      'resolved',
+    ]);
   });
 });
 
