@@ -14,7 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { expect, fixture } from '@open-wc/testing';
+import { expect, fixture, waitUntil } from '@open-wc/testing';
 import { html, LitElement } from 'lit';
 import { consume } from '@lit/context';
 
@@ -632,6 +632,60 @@ describe('ButtressDbService wait', () => {
     });
 
     expect(called).to.equal(true);
+  });
+
+  // The callback's error isn't swallowed: it reaches the page as an unhandled rejection, recorded here. The test runner
+  // reports those with console.error, as the queue reports a rejected write, so that's silenced meanwhile.
+  describe('with a dboComplete callback that throws', () => {
+    let uncaught: unknown[];
+    let originalError: typeof console.error;
+    const onRejection = (event: PromiseRejectionEvent) => {
+      uncaught.push(event.reason);
+    };
+    const throwing = () => {
+      throw new Error('callback failed');
+    };
+    const uncaughtMessages = async () => {
+      await waitUntil(() => uncaught.length > 0, 'no unhandled rejection');
+      return uncaught.map((err) => (err as Error).message);
+    };
+
+    beforeEach(() => {
+      uncaught = [];
+      window.addEventListener('unhandledrejection', onRejection);
+      originalError = console.error;
+      console.error = () => {};
+    });
+
+    afterEach(() => {
+      window.removeEventListener('unhandledrejection', onRejection);
+      console.error = originalError;
+    });
+
+    it('still resolves with wait once Buttress accepts the write', async () => {
+      const el = await connected();
+
+      const setting = el.set('organisation.x.name', 'b', {
+        wait: true,
+        dboComplete: { resolve: throwing, reject: () => {} },
+      });
+
+      expect(await outcomeOf(setting)).to.equal('resolved');
+      expect(await uncaughtMessages()).to.deep.equal(['callback failed']);
+    });
+
+    it('still rejects with wait when Buttress rejects the write', async () => {
+      const el = await connected();
+      status = 400;
+
+      const setting = el.set('organisation.x.name', 'b', {
+        wait: true,
+        dboComplete: { resolve: () => {}, reject: throwing },
+      });
+
+      expect(await outcomeOf(setting)).to.equal('rejected');
+      expect(await uncaughtMessages()).to.deep.equal(['callback failed']);
+    });
   });
 
   it('still calls dboComplete.reject with wait when Buttress rejects the write', async () => {

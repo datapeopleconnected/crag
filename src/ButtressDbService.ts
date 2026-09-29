@@ -403,8 +403,9 @@ export class ButtressDbService extends LitElement {
     return this._write(opts, (o) => this._dsStoreInterface.spliceExt(path, start, deleteCount, o, ...items));
   }
 
-  // Runs a write. With wait, returns a promise of its result that settles with the write's dboComplete. The write
-  // itself still runs straight away, so an invalid call throws rather than rejecting.
+  // Runs a write. With wait, returns a promise of its result that settles with the write's dboComplete, even if the
+  // caller's own dboComplete throws. The write itself still runs straight away, so an invalid call throws rather than
+  // rejecting.
   private _write<T>(opts: WriteOpts | undefined, write: (opts?: NotifyChangeOpts) => T): T | Promise<T> {
     if (!opts?.wait) return write(opts);
 
@@ -417,12 +418,18 @@ export class ButtressDbService extends LitElement {
       ...rest,
       dboComplete: {
         resolve: (value?: unknown) => {
-          rest.dboComplete?.resolve(value);
-          settle.resolve();
+          try {
+            rest.dboComplete?.resolve(value);
+          } finally {
+            settle.resolve();
+          }
         },
         reject: (err?: unknown) => {
-          rest.dboComplete?.reject(err);
-          settle.reject(err);
+          try {
+            rest.dboComplete?.reject(err);
+          } finally {
+            settle.reject(err);
+          }
         },
       },
     });
