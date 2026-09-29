@@ -172,6 +172,8 @@ any time.
 Before you write:
 
 - `set`, `push` and `splice` only work inside entities that are already in the store: queried, fetched or created.
+  Inside one, `set` creates any object missing on the way to its path, as Buttress does, and throws if one on the
+  way is `null` or isn't an object.
 - Buttress can append to an array and remove from it, but not insert into the middle. So `push`, and a `splice` that
   only adds at the end, send each added item; a `splice` that only removes sends each removal; and any other `splice`
   sends the whole new array, which overwrites any change someone else makes to that array at the same time.

@@ -144,11 +144,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const parts = path.split('.');
     if (parts.length === 2) return this.__setEntity(parts[1], value, opts);
 
-    // Nothing to set inside an object that isn't in the store.
-    const parent = parts.length > 2 ? this._store.get(parts.slice(0, -1).join('.')) : undefined;
-    if (parts.length > 2 && (typeof parent !== 'object' || parent === null)) {
-      opts?.dboComplete?.resolve();
-      return undefined;
+    if (parts.length > 2) {
+      // Nothing to set inside an entity that isn't in the store.
+      if (!this._store.get(parts.slice(0, 2).join('.'))) {
+        opts?.dboComplete?.resolve();
+        return undefined;
+      }
+      this.__createParents(parts);
     }
 
     const changed = this._store.get(path) !== value;
@@ -158,6 +160,22 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this.__send(opts, () => (changed && entityPath ? [this.__generateUpdateRequest(parts[1], entityPath, value)] : []));
 
     return setPath;
+  }
+
+  // Creates the objects missing on the way to a path inside an entity, as Buttress's $set does. Throws, before changing
+  // anything, for one that is null or isn't an object, since Buttress can't set a property inside that either.
+  private __createParents(parts: string[]) {
+    for (let i = 3; i < parts.length; i += 1) {
+      const parentPath = parts.slice(0, i).join('.');
+      const parent = this._store.get(parentPath);
+      if (parent === undefined) {
+        this._store.set(parentPath, {}, { silent: true });
+      } else if (parent === null || typeof parent !== 'object') {
+        throw new Error(
+          `Unable to set ${parts.join('.')}: ${parentPath} is ${parent === null ? 'null' : `a ${typeof parent}`}, not an object`,
+        );
+      }
+    }
   }
 
   private __setEntity(id: string, value: any, opts?: NotifyChangeOpts): string | undefined {

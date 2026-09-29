@@ -877,7 +877,7 @@ describe('ButtressDataService writes', () => {
     expect(ds.get('organisation.y')).to.equal(undefined);
   });
 
-  it('sends nothing, and resolves dboComplete, for a set inside an object that is not in the store', async () => {
+  it('sends nothing, and resolves dboComplete, for a set inside an entity that is not in the store', async () => {
     const ds = withEntity();
     const { dboComplete, outcome } = tracked();
 
@@ -888,7 +888,78 @@ describe('ButtressDataService writes', () => {
     expect(outcome()).to.equal('resolved');
   });
 
-  it('still sends and notifies other changes made alongside a set inside an object that is not in the store', async () => {
+  // As Buttress's $set does.
+  it('creates the object missing on the way to a nested set, and sends the set', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', name: 'y' });
+    const { dboComplete, outcome } = tracked();
+
+    expect(ds.set('organisation.y.address.city', 'York', { dboComplete })).to.equal('organisation.y.address.city');
+    await settle(ds);
+
+    expect(ds.get('organisation.y')).to.deep.equal({ id: 'y', name: 'y', address: { city: 'York' } });
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/y', body: { path: 'address.city', value: 'York' } }]);
+    expect(outcome()).to.equal('resolved');
+  });
+
+  it('creates every object missing on the way to a nested set', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.meta.source.name', 'import');
+    await settle(ds);
+
+    expect(ds.get('organisation.x.meta')).to.deep.equal({ source: { name: 'import' } });
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'meta.source.name', value: 'import' } }]);
+  });
+
+  it('notifies subscribers of a nested set that created the object on the way', async () => {
+    const store = new ButtressStore();
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      store,
+      writeSchema,
+    );
+    store.get('organisation').set('y', { id: 'y' });
+    // Past the notification of the data service setting up its collection.
+    await flush();
+    const notified: unknown[] = [];
+    store.subscribe('organisation.*', (cr: { path: string; value: unknown }) => notified.push([cr.path, cr.value]));
+
+    ds.set('organisation.y.address.city', 'York');
+    await settle(ds);
+
+    expect(notified).to.deep.equal([['organisation.y.address.city', 'York']]);
+  });
+
+  // Buttress can't set a property inside one either.
+  it('throws for a nested set under null, and changes and sends nothing', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', address: null });
+
+    expect(() => ds.set('organisation.y.address.city', 'York')).to.throw(
+      'Unable to set organisation.y.address.city: organisation.y.address is null, not an object',
+    );
+    await settle(ds);
+
+    expect(ds.get('organisation.y')).to.deep.equal({ id: 'y', address: null });
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('throws for a nested set under a value that is not an object, and changes and sends nothing', async () => {
+    const ds = withEntity();
+
+    expect(() => ds.set('organisation.x.name.first', 'b')).to.throw(
+      'Unable to set organisation.x.name.first: organisation.x.name is a string, not an object',
+    );
+    await settle(ds);
+
+    expect(ds.get('organisation.x.name')).to.equal('a');
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('still sends and notifies other changes made alongside a set inside an entity that is not in the store', async () => {
     const store = new ButtressStore();
     const ds = new ButtressDataService(
       'organisation',

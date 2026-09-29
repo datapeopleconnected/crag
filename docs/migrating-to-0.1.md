@@ -283,8 +283,10 @@ realtime updates whose `data.clientSessionId` matches.
   - a `set` and then a `delete` of the same entity in one go threw an error, and the delete wasn't sent;
   - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends the
     top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing;
-  - a `set` inside an object that isn't in the store notified subscribers of a change that never happened, and threw
-    an error that could stop other subscribers hearing about other changes. It now does nothing;
+  - a `set` inside an entity that isn't in the store notified subscribers of a change that never happened, and threw
+    an error that could stop other subscribers hearing about other changes. It now does nothing. Inside an entity
+    that is in the store, a `set` creates any object missing on the way to its path and sends the set, and throws if
+    one on the way is `null` or isn't an object;
   - deleting an entity that isn't in the store threw an error. It now does nothing and returns `false`;
   - `dboComplete` was never called for `localOnly`, `silent` or `forceChanged` writes. It's now called straight away.
 - **`forceChanged` leaves your options alone.** It used to set `localOnly: true` on the options object you passed,
