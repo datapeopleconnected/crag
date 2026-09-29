@@ -14,7 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { io } from 'socket.io-client';
+import { io, type Socket } from 'socket.io-client';
 
 import { Logger, LogLevel } from './Logger.js';
 
@@ -42,6 +42,9 @@ export default class ButtressDataRealtime {
   private _loadById: (detail: EventDataDataServiceLoadById) => unknown;
 
   private _isConnected: boolean = false;
+
+  // What bjs-connection-changed last said.
+  private _reported?: boolean;
 
   // Survives replacing the socket: updates sent while this instance had no connection are lost either way.
   private _hasConnected: boolean = false;
@@ -80,20 +83,21 @@ export default class ButtressDataRealtime {
 
     this._logger.debug(`Opening connection to ${uri}`);
 
-    this._dispatchCustomEvent('bjs-connection-changed', {
-      detail: true,
-      bubbles: true,
-      composed: true,
-    });
+    this._report(true);
 
     try {
-      this._socket = io(uri, {
-        query: {
+      // A connection of its own: socket.io otherwise shares one between every socket on the endpoint, with the options
+      // of the first, so a second api path would join with the first's token, and closing either closed both.
+      const socket: Socket = io(uri, {
+        auth: {
           token: this._settings.token,
         },
+        forceNew: true,
       });
-      this._socket.on('connect', () => this._onConnected());
-      this._socket.on('disconnect', () => this._onDisconnected());
+      this._socket = socket;
+      socket.on('connect', () => this._onConnected());
+      socket.on('disconnect', (reason: string) => this._onDisconnected(socket, reason));
+      socket.on('connect_error', (err: Error) => this._onConnectError(socket, err));
       this._configureRxEvents();
     } catch (err) {
       this._onDisconnected();
@@ -116,6 +120,11 @@ export default class ButtressDataRealtime {
   set _connected(state: boolean) {
     this._isConnected = state;
     this._logger.debug(state ? `Connected` : `Disconnected`);
+    this._report(state);
+  }
+
+  private _report(state: boolean) {
+    this._reported = state;
     this._dispatchCustomEvent('bjs-connection-changed', {
       detail: state,
       bubbles: true,
@@ -125,7 +134,8 @@ export default class ButtressDataRealtime {
 
   private _onConnected() {
     this._connected = true;
-    if (this._hasConnected) this._resync();
+    // Buttress sends no update for a change made before the socket joined, so anything loaded before then may be stale.
+    if (this._hasConnected || this._store.hasLoaded()) this._resync();
     this._hasConnected = true;
   }
 
@@ -140,8 +150,30 @@ export default class ButtressDataRealtime {
     });
   }
 
-  private _onDisconnected() {
+  // socket.io reconnects after losing the connection, but not after the server closes it, as Buttress does for a token
+  // that has been deleted, so that socket is dropped.
+  private _onDisconnected(socket?: Socket, reason?: string) {
     this._connected = false;
+    if (!socket || socket.active) return;
+
+    if (reason === 'io server disconnect') this._logger.warn(`Buttress closed the realtime connection`);
+    this._drop(socket);
+  }
+
+  // socket.io tries again after a connection fails, as when Buttress can't be reached, but not after Buttress refuses
+  // it, as it does for a token it doesn't know or one used on another app's api path.
+  private _onConnectError(socket: Socket, err: Error) {
+    if (!socket.active) {
+      this._logger.error(`Buttress refused the realtime connection: ${err.message}`);
+      this._drop(socket);
+    } else if (this._reported !== false) {
+      this._logger.warn(`Unable to open the realtime connection, trying again: ${err.message}`);
+    }
+    if (this._reported !== false) this._connected = false;
+  }
+
+  private _drop(socket: Socket) {
+    if (this._socket === socket) this._socket = null;
   }
 
   setLogLevel(level: LogLevel) {

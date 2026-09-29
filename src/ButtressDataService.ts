@@ -735,6 +735,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._queryCache.clear();
   }
 
+  // Whether it holds any entities or cached queries.
+  hasLoaded(): boolean {
+    return this.get(this.name).size > 0 || this._queryCache.size > 0;
+  }
+
   nextIdle(): Promise<boolean> {
     return this._queue.nextIdle();
   }

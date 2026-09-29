@@ -96,9 +96,9 @@ describe('ButtressRealtime', () => {
   });
 
   describe('resync', () => {
-    const setup = () => {
+    const setup = (loaded = false) => {
       const calls: string[] = [];
-      const store = { clearQueryMaps: () => calls.push('clearQueryMaps') };
+      const store = { clearQueryMaps: () => calls.push('clearQueryMaps'), hasLoaded: () => loaded };
       const settings = buildSettings({});
       settings.endpoint = 'http://127.0.0.1:1';
       settings.token = 'abc';
@@ -112,13 +112,25 @@ describe('ButtressRealtime', () => {
       return { realtime, calls, connected, resyncs: () => calls.filter((c) => c === 'bjs-resync').length };
     };
 
-    it('does not resync on the first connection', () => {
+    it('does not resync on the first connection when nothing has been loaded', () => {
       const { realtime, connected, resyncs } = setup();
 
       realtime.connect();
       connected();
 
       expect(resyncs()).to.equal(0);
+      realtime.disconnect();
+    });
+
+    // Buttress sends no update for a change made before the socket joined.
+    it('resyncs on the first connection when something was loaded before it', () => {
+      const { realtime, calls, connected, resyncs } = setup(true);
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      expect(calls.indexOf('clearQueryMaps')).to.be.lessThan(calls.indexOf('bjs-resync'));
       realtime.disconnect();
     });
 
@@ -289,6 +301,109 @@ describe('ButtressRealtime', () => {
 
       expect(events).to.deep.equal([{ type: 'bjs-connection-changed', detail: false }]);
       realtime.disconnect();
+    });
+
+    describe('when the socket fails', () => {
+      let logged: string[];
+      let originalError: typeof console.error;
+      let originalWarn: typeof console.warn;
+
+      beforeEach(() => {
+        logged = [];
+        originalError = console.error;
+        originalWarn = console.warn;
+        console.error = (...args: unknown[]) => logged.push(`error ${JSON.stringify(args)}`);
+        console.warn = (...args: unknown[]) => logged.push(`warn ${JSON.stringify(args)}`);
+      });
+
+      afterEach(() => {
+        console.error = originalError;
+        console.warn = originalWarn;
+      });
+
+      const connectedTo = (apiPath: string) => {
+        const events: { type: string; detail: unknown }[] = [];
+        const realtime = new ButtressRealtime(
+          { clearQueryMaps: () => {}, hasLoaded: () => false } as any,
+          buildSettings({ endpoint: 'http://127.0.0.1:1', token: 'abc', apiPath }),
+          (type: string, init: CustomEventInit) => events.push({ type, detail: init.detail }),
+          () => {},
+        );
+        realtime.connect();
+        return { realtime, events, socket: (realtime as any)._socket };
+      };
+      const connectionChanges = (events: { type: string; detail: unknown }[]) =>
+        events.filter((e) => e.type === 'bjs-connection-changed').map((e) => e.detail);
+
+      // As socket.io handles Buttress refusing a token on another app's namespace: it gives up for good.
+      it('reports a connection Buttress refuses, logs it, and closes the socket', () => {
+        const { realtime, events, socket } = connectedTo('other-app');
+
+        socket.onpacket({ type: 4, nsp: '/other-app', data: { message: 'invalid-namespace' } });
+
+        expect(connectionChanges(events)).to.deep.equal([true, false]);
+        expect(socket.active).to.equal(false);
+        expect(realtime.isOpen).to.equal(false);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^error .*invalid-namespace/);
+      });
+
+      // Nothing listens on port 1, so the connection fails, and socket.io tries again later.
+      it('reports a connection that fails once, and leaves socket.io to try again', async () => {
+        const { realtime, events, socket } = connectedTo('app');
+
+        await new Promise((resolve) => {
+          socket.once('connect_error', resolve);
+        });
+        socket.emitReserved('connect_error', new Error('xhr poll error'));
+
+        expect(connectionChanges(events)).to.deep.equal([true, false]);
+        expect(socket.active).to.equal(true);
+        expect(realtime.isOpen).to.equal(true);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^warn /);
+        realtime.disconnect();
+      });
+
+      // As socket.io handles Buttress closing the connection, as it does for a token that's been deleted.
+      it('reports a connection Buttress closes, logs it, and closes the socket', () => {
+        const { realtime, events, socket } = connectedTo('app');
+        (realtime as any)._onConnected();
+
+        socket.onpacket({ type: 1, nsp: '/app' });
+
+        expect(connectionChanges(events)).to.deep.equal([true, true, false]);
+        expect(realtime.isOpen).to.equal(false);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^warn /);
+      });
+    });
+
+    // socket.io shares one connection between the namespaces on an endpoint, with the options of the first.
+    it('connects with its own token when another is connected to the same endpoint', () => {
+      const connect = (token: string, apiPath: string) => {
+        const realtime = new ButtressRealtime(
+          {} as any,
+          buildSettings({ endpoint: 'http://127.0.0.1:1', token, apiPath }),
+          () => {},
+          () => {},
+        );
+        realtime.connect();
+        return realtime;
+      };
+      // The token a socket sends: its own auth, or else its connection's query.
+      const tokenSent = (realtime: ButtressRealtime) => {
+        const socket = (realtime as any)._socket;
+        return socket.auth?.token ?? socket.io.opts.query?.token;
+      };
+
+      const first = connect('one', 'app-one');
+      const second = connect('two', 'app-two');
+
+      expect([tokenSent(first), tokenSent(second)]).to.deep.equal(['one', 'two']);
+      expect((first as any)._socket.io === (second as any)._socket.io).to.equal(false);
+      first.disconnect();
+      second.disconnect();
     });
 
     it('reports a disconnection, and logs the error, when the socket cannot be set up', () => {

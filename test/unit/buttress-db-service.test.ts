@@ -314,6 +314,56 @@ describe('ButtressDbService resync', () => {
 
     expect(cleared).to.deep.equal(['organisation', 'person']);
   });
+
+  // So realtime resyncs when it first connects after something was loaded.
+  describe('whether anything has been loaded', () => {
+    let originalFetch: typeof window.fetch;
+
+    beforeEach(() => {
+      originalFetch = window.fetch;
+      window.fetch = async (input: RequestInfo | URL) => {
+        const { pathname } = new URL(input.toString());
+        if (pathname.endsWith('/app/schema')) {
+          return new Response(JSON.stringify([{ name: 'organisation', type: 'collection', properties: {} }]));
+        }
+        return new Response(pathname.endsWith('/count') ? '0' : '[]');
+      };
+    });
+
+    afterEach(() => {
+      window.fetch = originalFetch;
+    });
+
+    const connected = async () => {
+      const el = await fixture<ButtressDbService>(html`
+        <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+      `);
+      (el as any)._realtime.connect = () => {};
+      await el.connect();
+      return el;
+    };
+    const hasLoaded = (el: ButtressDbService) => (el as any)._dsStoreInterface.hasLoaded();
+
+    it('is false before anything is loaded', async () => {
+      expect(hasLoaded(await connected())).to.equal(false);
+    });
+
+    it('is true after a query, even one that found nothing', async () => {
+      const el = await connected();
+
+      await el.query('organisation', {});
+
+      expect(hasLoaded(el)).to.equal(true);
+    });
+
+    it('is true with an entity in the store', async () => {
+      const el = await connected();
+
+      el.create('organisation', { id: 'x' }, { localOnly: true });
+
+      expect(hasLoaded(el)).to.equal(true);
+    });
+  });
 });
 
 describe('ButtressDbService awaitConnection', () => {

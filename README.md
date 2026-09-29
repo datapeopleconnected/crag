@@ -352,9 +352,9 @@ Both events bubble and cross shadow roots.
 
 | Event                    | `detail`             | Fired                                                                                                                                  |
 | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`).        |
+| `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`), and with `false` when it can't connect. socket.io keeps trying after a network failure. It stops if Buttress refuses the connection, for a token it doesn't know or one for another app's api path, or closes it, as it does when the token is deleted. crag then logs it and closes the socket. |
 | `dataservice:loadById`   | `{ schemaName, id }` | When a realtime update arrives for an entity that isn't in the store. crag fetches the entity itself; the event is for information. |
-| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
+| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM, and when it first connects after something was loaded. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
 
 ```ts
 db.addEventListener('bjs-connection-changed', (e) => {
