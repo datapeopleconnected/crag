@@ -26,11 +26,14 @@ const APP_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_APP_TOKEN';
 const USER1_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER1_TOKEN';
 const USER2_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER2_TOKEN';
 
-// scripts/e2e-seed.js creates these. Test Org n has number n * 10, and is active when n is even.
+// scripts/e2e-seed.js creates these. Test Org n has number n * 10, and is active when n is even. Buttress fills in
+// the arrays, which the seed leaves out.
 const SEEDED = Array.from({ length: 10 }, (_, n) => ({
   name: `Test Org ${n}`,
   number: n * 10,
   status: n % 2 === 0 ? 'active' : 'inactive',
+  tags: [],
+  contacts: [],
 }));
 const SEEDED_NAMES = SEEDED.map((org) => org.name);
 
@@ -158,6 +161,54 @@ describe('ButtressDbService', () => {
         expect(await countNamed('Awaited Delete')).to.equal(0);
       });
 
+      // The first set goes alone, and the two queued behind it go as one bulk update, which Buttress answers for each.
+      it('rejects only the update in a bundle that Buttress refuses', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Refused Update'), { wait: true }))!;
+
+        const [named, numbered, statused] = await Promise.all(
+          [
+            db.set(`${path}.name`, 'Refused Update 2', { wait: true }),
+            db.set(`${path}.number`, 'not a number', { wait: true }),
+            db.set(`${path}.status`, 'inactive', { wait: true }),
+          ].map((write) => write.catch((e: unknown) => e)),
+        );
+
+        expect(named).to.equal(`${path}.name`);
+        expect(numbered).to.be.instanceOf(ButtressError);
+        expect((numbered as ButtressError).status).to.equal(400);
+        expect(statused).to.equal(`${path}.status`);
+        expect(
+          await db.count('organisation', { name: { $eq: 'Refused Update 2' }, status: { $eq: 'inactive' } }),
+        ).to.equal(1);
+      });
+
+      it('stores whole arrays set into typed arrays as they were sent', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Array Org'), { wait: true }))!;
+
+        await db.set(`${path}.tags`, ['b', 'a'], { wait: true });
+        await db.set(
+          `${path}.contacts`,
+          [
+            { name: 'A', qty: 1 },
+            { name: 'B', qty: 2 },
+          ],
+          { wait: true },
+        );
+        // Buttress can't insert into the middle of an array, so this sends the whole array too.
+        await db.spliceWith(`${path}.contacts`, 1, 0, { wait: true }, { name: 'M', qty: 5 });
+
+        // Read with another client, so the arrays come from Buttress rather than this store.
+        const reader = await connectAs(APP_TOKEN);
+        const { results } = await reader.query('organisation', { name: { $eq: 'Array Org' } });
+        const contacts = results[0].contacts as Entity[];
+        expect(results[0].tags).to.deep.equal(['b', 'a']);
+        expect(contacts.map(({ name, qty }) => ({ name, qty }))).to.deep.equal([
+          { name: 'A', qty: 1 },
+          { name: 'M', qty: 5 },
+          { name: 'B', qty: 2 },
+        ]);
+      });
+
       it('rejects a write that Buttress rejects', async () => {
         // number and status are required, so Buttress refuses the entity.
         const payload = db.createObject('organisation');
@@ -191,6 +242,25 @@ describe('ButtressDbService', () => {
 
       await writer.set(`${path}.name`, 'Realtime Org 2', { wait: true });
       await eventually(() => watchedName() === 'Realtime Org 2', 'the update to reach the watcher');
+    });
+
+    it("applies another client's bundled updates to the store", async function () {
+      this.timeout(15000);
+      const { watcher, writer } = await clients();
+      const path = (await writer.create('organisation', newOrg(writer, 'Bundled Org'), { wait: true }))!;
+      await eventually(() => watcher.get(path) !== undefined, 'the create to reach the watcher');
+
+      // The first set goes alone, and the two queued behind it go as one bulk update.
+      await Promise.all([
+        writer.set(`${path}.name`, 'Bundled Org 2', { wait: true }),
+        writer.set(`${path}.number`, 456, { wait: true }),
+        writer.set(`${path}.status`, 'inactive', { wait: true }),
+      ]);
+      const watched = (key: string) => watcher.get(`${path}.${key}`) as unknown;
+      await eventually(
+        () => watched('name') === 'Bundled Org 2' && watched('number') === 456 && watched('status') === 'inactive',
+        'the bundled updates to reach the watcher',
+      );
     });
 
     // Buttress doesn't send deletes: to work out who may see the change, its socket policy router looks up the
