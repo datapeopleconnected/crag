@@ -753,9 +753,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this.__cacheEpoch += 1;
   }
 
-  // Whether it holds any entities or cached queries.
-  hasLoaded(): boolean {
-    return this.get(this.name).size > 0 || this._queryCache.size > 0;
+  // Whether anything has been queried or fetched: whether it holds any entities or cached queries, or has a search or
+  // GET out.
+  hasQueried(): boolean {
+    return this.get(this.name).size > 0 || this._queryCache.size > 0 || this.__reads.size > 0;
   }
 
   nextIdle(): Promise<boolean> {

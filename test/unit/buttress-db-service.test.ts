@@ -315,18 +315,26 @@ describe('ButtressDbService resync', () => {
     expect(cleared).to.deep.equal(['organisation', 'person']);
   });
 
-  // So realtime resyncs when it first connects after something was loaded.
-  describe('whether anything has been loaded', () => {
+  // So realtime resyncs when it first connects after anything was queried, even a query still out: Buttress ran it
+  // before the socket joined, and sends no update for a change made in between.
+  describe('whether anything has been queried', () => {
     let originalFetch: typeof window.fetch;
+    let hold: Promise<void> | undefined;
+    let searches: number;
 
     beforeEach(() => {
       originalFetch = window.fetch;
-      window.fetch = async (input: RequestInfo | URL) => {
+      hold = undefined;
+      searches = 0;
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const { pathname } = new URL(input.toString());
         if (pathname.endsWith('/app/schema')) {
           return new Response(JSON.stringify([{ name: 'organisation', type: 'collection', properties: {} }]));
         }
-        return new Response(pathname.endsWith('/count') ? '0' : '[]');
+        if (pathname.endsWith('/count')) return new Response('0');
+        await hold;
+        if (init?.method === 'SEARCH') searches += 1;
+        return new Response(init?.method === 'GET' ? '{"id":"x"}' : '[]');
       };
     });
 
@@ -342,10 +350,18 @@ describe('ButtressDbService resync', () => {
       await el.connect();
       return el;
     };
-    const hasLoaded = (el: ButtressDbService) => (el as any)._dsStoreInterface.hasLoaded();
+    const hasQueried = (el: ButtressDbService) => (el as any)._dsStoreInterface.hasQueried();
+    // Holds the requests after it, until the function it returns is called.
+    const holdRequests = () => {
+      let release!: () => void;
+      hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      return release;
+    };
 
-    it('is false before anything is loaded', async () => {
-      expect(hasLoaded(await connected())).to.equal(false);
+    it('is false before anything is queried', async () => {
+      expect(hasQueried(await connected())).to.equal(false);
     });
 
     it('is true after a query, even one that found nothing', async () => {
@@ -353,7 +369,7 @@ describe('ButtressDbService resync', () => {
 
       await el.query('organisation', {});
 
-      expect(hasLoaded(el)).to.equal(true);
+      expect(hasQueried(el)).to.equal(true);
     });
 
     it('is true with an entity in the store', async () => {
@@ -361,7 +377,47 @@ describe('ButtressDbService resync', () => {
 
       el.create('organisation', { id: 'x' }, { localOnly: true });
 
-      expect(hasLoaded(el)).to.equal(true);
+      expect(hasQueried(el)).to.equal(true);
+    });
+
+    it('is true while a query is still out', async () => {
+      const el = await connected();
+      const release = holdRequests();
+
+      const loading = el.query('organisation', {});
+
+      expect(hasQueried(el)).to.equal(true);
+      release();
+      await loading;
+    });
+
+    it('is true while a getById is still out', async () => {
+      const el = await connected();
+      const release = holdRequests();
+
+      const loading = el.getById('organisation', 'x');
+
+      expect(hasQueried(el)).to.equal(true);
+      release();
+      await loading;
+    });
+
+    it('resyncs when the socket first connects while the first query is still out', async () => {
+      const el = await connected();
+      let resyncs = 0;
+      el.addEventListener('bjs-resync', () => {
+        resyncs += 1;
+      });
+      const release = holdRequests();
+
+      const loading = el.query('organisation', {});
+      (el as any)._realtime._onConnected();
+      release();
+      await loading;
+      await el.query('organisation', {});
+
+      expect(resyncs).to.equal(1);
+      expect(searches).to.equal(2);
     });
   });
 });

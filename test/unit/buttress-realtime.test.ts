@@ -98,7 +98,7 @@ describe('ButtressRealtime', () => {
   describe('resync', () => {
     const setup = (loaded = false) => {
       const calls: string[] = [];
-      const store = { clearQueryMaps: () => calls.push('clearQueryMaps'), hasLoaded: () => loaded };
+      const store = { clearQueryMaps: () => calls.push('clearQueryMaps'), hasQueried: () => loaded };
       const settings = buildSettings({});
       settings.endpoint = 'http://127.0.0.1:1';
       settings.token = 'abc';
@@ -112,7 +112,7 @@ describe('ButtressRealtime', () => {
       return { realtime, calls, connected, resyncs: () => calls.filter((c) => c === 'bjs-resync').length };
     };
 
-    it('does not resync on the first connection when nothing has been loaded', () => {
+    it('does not resync on the first connection when nothing has been queried', () => {
       const { realtime, connected, resyncs } = setup();
 
       realtime.connect();
@@ -123,7 +123,7 @@ describe('ButtressRealtime', () => {
     });
 
     // Buttress sends no update for a change made before the socket joined.
-    it('resyncs on the first connection when something was loaded before it', () => {
+    it('resyncs on the first connection when something was queried before it', () => {
       const { realtime, calls, connected, resyncs } = setup(true);
 
       realtime.connect();
@@ -324,7 +324,7 @@ describe('ButtressRealtime', () => {
       const connectedTo = (apiPath: string) => {
         const events: { type: string; detail: unknown }[] = [];
         const realtime = new ButtressRealtime(
-          { clearQueryMaps: () => {}, hasLoaded: () => false } as any,
+          { clearQueryMaps: () => {}, hasQueried: () => false } as any,
           buildSettings({ endpoint: 'http://127.0.0.1:1', token: 'abc', apiPath }),
           (type: string, init: CustomEventInit) => events.push({ type, detail: init.detail }),
           () => {},

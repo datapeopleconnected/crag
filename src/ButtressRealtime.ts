@@ -134,8 +134,9 @@ export default class ButtressDataRealtime {
 
   private _onConnected() {
     this._connected = true;
-    // Buttress sends no update for a change made before the socket joined, so anything loaded before then may be stale.
-    if (this._hasConnected || this._store.hasLoaded()) this._resync();
+    // Buttress sends no update for a change made before the socket joined, so anything queried before then may be stale,
+    // even a query still out, which Buttress may have answered from before then.
+    if (this._hasConnected || this._store.hasQueried()) this._resync();
     this._hasConnected = true;
   }
 

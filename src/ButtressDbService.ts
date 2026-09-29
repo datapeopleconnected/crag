@@ -38,8 +38,8 @@ import { Settings, buildSettings, coreSchemaLocalName } from './helpers.js';
 export interface customButtressStoreInterface extends ButtressStoreInterface {
   clearQueryMaps: () => void;
   localName: (schemaName: string) => string | undefined;
-  // Whether any data service holds entities or cached queries.
-  hasLoaded: () => boolean;
+  // Whether anything has been queried or fetched, including a search or GET still out.
+  hasQueried: () => boolean;
 }
 
 export interface WriteOpts extends NotifyChangeOpts {
@@ -72,8 +72,8 @@ export interface EventDataDataServiceLoadById {
  * @fires {CustomEvent<EventDataDataServiceLoadById>} dataservice:loadById - When a realtime update arrives for an
  * entity that isn't in the store. The element fetches the entity itself; the event is for information.
  * @fires {CustomEvent} bjs-resync - When the realtime socket connects again after losing its connection, or after the
- * element was moved in the DOM, and when it first connects after something was loaded. Updates sent in the meantime
- * are lost, so cached queries have been cleared: query again to reload what you're showing.
+ * element was moved in the DOM, and when it first connects after anything was queried, even a query still out. Updates
+ * sent in the meantime are lost, so cached queries have been cleared: query again to reload what you're showing.
  */
 export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
@@ -170,7 +170,7 @@ export class ButtressDbService extends LitElement {
       notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): boolean =>
         this._getDataService(path).notifyPath(path, value, opts),
       clearQueryMaps: () => Object.values(this._dataServices).forEach((ds) => ds.clearQueryMap()),
-      hasLoaded: () => Object.values(this._dataServices).some((ds) => ds.hasLoaded()),
+      hasQueried: () => Object.values(this._dataServices).some((ds) => ds.hasQueried()),
       localName: (schemaName: string) =>
         Object.keys(this._schema || {}).find((name) => this._schema?.[name].name === schemaName),
     };
