@@ -14,7 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import type { ButtressClient } from './ButtressClient.js';
+import { ButtressError, type ButtressClient } from './ButtressClient.js';
 import type { Logger } from './Logger.js';
 
 export interface QueuedRequest {
@@ -29,6 +29,14 @@ export interface QueuedRequest {
 interface PendingRequest extends QueuedRequest {
   resolve: (data: unknown) => void;
   reject: (err: unknown) => void;
+  // Never bundled, as for a create sent again on its own after the bulk add it was in was refused.
+  alone?: boolean;
+}
+
+// Buttress's answer for one update in a bulk update. One it didn't apply has null results, and its validation says why.
+interface BulkUpdateEntry {
+  results?: unknown;
+  validation?: true | { code?: number; message?: string };
 }
 
 // Sends a schema's requests to Buttress one at a time. With bundling on, adds and deletes go ahead of other
@@ -59,7 +67,9 @@ export class ButtressRequestQueue {
 
   push<T = unknown>(request: QueuedRequest): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      this._queue.push({ ...request, resolve: resolve as (data: unknown) => void, reject });
+      // Copied as it will be sent, since it can hold the store's own objects, which may change before it's sent.
+      const body = request.body === undefined ? undefined : JSON.parse(JSON.stringify(request.body));
+      this._queue.push({ ...request, body, resolve: resolve as (data: unknown) => void, reject });
       this._next();
     });
   }
@@ -106,9 +116,15 @@ export class ButtressRequestQueue {
     const first = this._queue[firstIdx === -1 ? 0 : firstIdx];
     const batch = [first];
 
-    if (this.bundling && (first.type === 'add' || first.type === 'update')) {
+    if (this.bundling && !first.alone && (first.type === 'add' || first.type === 'update')) {
       this._queue.forEach((r, idx) => {
-        if (batch.length < this.bundlingChunk && r !== first && r.type === first.type && this._canSendNow(idx, batch)) {
+        if (
+          batch.length < this.bundlingChunk &&
+          r !== first &&
+          !r.alone &&
+          r.type === first.type &&
+          this._canSendNow(idx, batch)
+        ) {
           batch.push(r);
         }
       });
@@ -128,19 +144,64 @@ export class ButtressRequestQueue {
 
   private async _send(batch: PendingRequest[]) {
     this._sending = true;
-    const request = batch.length > 1 ? this._bulk(batch) : batch[0];
+    const bulk = batch.length > 1;
+    const request = bulk ? this._bulk(batch) : batch[0];
 
     try {
       const data = await this._client.request(request.method, request.url, { body: request.body });
-      // Every bundled request settles with the bulk request.
-      batch.forEach((r) => r.resolve(data));
+      if (bulk && request.type === 'update') {
+        this._settleUpdates(batch, data, request.url);
+      } else {
+        // Every create in a bulk add settles with it, since Buttress stores all of them or none.
+        batch.forEach((r) => r.resolve(data));
+      }
     } catch (err) {
-      this._logger.error(err);
-      batch.forEach((r) => r.reject(err));
+      if (bulk && request.type === 'add' && err instanceof ButtressError && err.status === 400) {
+        // Buttress stores none of a bulk add if one of them is invalid, and names only the first. So each is sent again
+        // on its own, ahead of anything queued since: the valid ones are stored, and each invalid one gets its error.
+        this._queue.unshift(...batch.map((r) => ({ ...r, alone: true })));
+      } else {
+        this._logger.error(err);
+        batch.forEach((r) => r.reject(err));
+      }
     } finally {
       this._sending = false;
       this._next();
     }
+  }
+
+  // Buttress answers a bulk update with an entry for each update, in the order they were sent, and applies the rest
+  // when it refuses one. So each update settles from its own entry.
+  private _settleUpdates(batch: PendingRequest[], data: unknown, url: string) {
+    const answered =
+      Array.isArray(data) && data.length === batch.length && data.every((entry) => entry && typeof entry === 'object');
+    if (!answered) {
+      // As from a Buttress older than crag supports. It may have applied some or all of them.
+      const err = new Error(
+        `Buttress didn't answer each update in the bulk update to ${url}, so crag can't tell which it applied. ` +
+          `crag needs Buttress develop at 3f044191 or later.`,
+      );
+      this._logger.error(err);
+      batch.forEach((r) => r.reject(err));
+      return;
+    }
+
+    (data as BulkUpdateEntry[]).forEach((entry, idx) => {
+      const refusal = entry.validation === true ? undefined : entry.validation;
+      if (entry.results !== null && !refusal) {
+        batch[idx].resolve(entry.results);
+        return;
+      }
+
+      const err = new ButtressError(
+        refusal?.code ?? 500,
+        'POST',
+        url,
+        refusal?.message ?? "Buttress didn't apply the update",
+      );
+      this._logger.error(err);
+      batch[idx].reject(err);
+    });
   }
 
   private _bulk(batch: PendingRequest[]): QueuedRequest {

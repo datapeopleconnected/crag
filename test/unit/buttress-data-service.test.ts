@@ -198,6 +198,123 @@ describe('ButtressDataService request queue', () => {
   });
 });
 
+describe('ButtressDataService request timeout', () => {
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    // The queue logs the request that timed out.
+    console.error = () => {};
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  it('sends the requests queued behind one that never answers once it times out', async () => {
+    const sent: string[] = [];
+    // The first request never gets a response, and fails when its signal aborts, as fetch does.
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(`${init?.method} ${new URL(input.toString()).pathname}`);
+      if (sent.length > 1) return Promise.resolve(new Response('{}'));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    };
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc', requestTimeout: 20 },
+      new ButtressStore(),
+      schema,
+    );
+
+    const hung = ds.getById('hung');
+    const created = createAndTrack(ds, 'next');
+
+    expect(await outcomeOf(hung)).to.equal('rejected');
+    expect(await outcomeOf(created)).to.equal('resolved');
+    expect(sent).to.deep.equal(['GET /api/v1/organisation/hung', 'POST /api/v1/organisation/']);
+  });
+});
+
+// A request's body is made from the store's objects, which can change before the request is sent.
+describe('ButtressDataService queued request bodies', () => {
+  type Sent = { method: string; path: string; body?: unknown };
+
+  let originalFetch: typeof window.fetch;
+  let sent: Sent[];
+
+  const listSchema: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: { name: { __type: 'string' }, tags: { __type: 'array' } },
+  };
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    sent = [];
+    Logger.disableLogging = true;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input.toString()).pathname.replace('/api/v1/organisation', '');
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({ method: init!.method!, path, body });
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (path === '/bulk/update') return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
+      return new Response('{}');
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      listSchema,
+    );
+
+  // The first create is sent straight away, so each later one waits in the queue while the push after it runs.
+  it('sends each create as it was made, and not the pushes after it as well', async () => {
+    const ds = dataService();
+
+    for (const name of ['a', 'b', 'c']) {
+      const path = ds.create({ id: name, name, tags: [] });
+      ds.push(`${path}.tags`, 'new');
+    }
+    await ds.nextIdle();
+
+    const creates = sent.filter((r) => r.method === 'POST' && r.path === '/');
+    const bundled = sent.filter((r) => r.path === '/bulk/add').flatMap((r) => r.body as unknown[]);
+    expect([...creates.map((r) => r.body), ...bundled]).to.deep.equal(
+      ['a', 'b', 'c'].map((name) => ({ id: name, name, tags: [] })),
+    );
+    expect(ds.get('organisation.c.tags')).to.deep.equal(['new']);
+  });
+
+  it('sends a create as it was made, and not a splice after it as well', async () => {
+    const ds = dataService();
+    ds.create({ id: 'first', name: 'first', tags: [] });
+
+    ds.create({ id: 'x', name: 'x', tags: ['a', 'b'] });
+    ds.splice('organisation.x.tags', 0, 1);
+    await ds.nextIdle();
+
+    expect(sent.slice(1)).to.deep.equal([
+      { method: 'POST', path: '/', body: { id: 'x', name: 'x', tags: ['a', 'b'] } },
+      { method: 'PUT', path: '/x', body: { path: 'tags.0.__remove__', value: '' } },
+    ]);
+  });
+});
+
 describe('ButtressDataService query', () => {
   type Org = { id: string; name: string; status: string };
 
@@ -232,6 +349,8 @@ describe('ButtressDataService query', () => {
         server.push(body);
         return new Response(JSON.stringify(body));
       }
+      // Answered for each update, as Buttress does, without applying them.
+      if (url.pathname.endsWith('/bulk/update')) return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
       if (init?.method === 'SEARCH') {
         searches += 1;
         await holdSearches;
@@ -386,6 +505,143 @@ describe('ButtressDataService query', () => {
     expect(names(results)).to.deep.equal(['A00', ...range(1, 9)]);
   });
 
+  // A search's response is older than a write made while it was out: Buttress hadn't had the write when it searched.
+  describe('with a write made while a search is out', () => {
+    let release: () => void;
+    const hold = () => {
+      holdSearches = new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+
+    it('keeps the write', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const loading = ds.query(active, { sort: byName, bust: true });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      ds.set('organisation.id01.note', 'renamed');
+      release();
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'Z01', status: 'active', note: 'renamed' });
+      expect(results.find((r) => r.id === 'id01')?.name).to.equal('Z01');
+    });
+
+    it('keeps the write when the search was still queued', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const first = ds.query(active, { sort: byName, bust: true });
+      // Queued behind the first, and sent before the update, which is queued behind it.
+      const second = ds.query(active, { limit: 10, sort: byName });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      release();
+      await Promise.all([first, second]);
+
+      expect(searches).to.equal(3);
+      expect(ds.get('organisation.id01.name')).to.equal('Z01');
+    });
+
+    it('still merges the fresh values of the other properties', async () => {
+      const ds = dataService();
+      await ds.query({});
+      // Changed by another client.
+      server[0].status = 'archived';
+      hold();
+
+      const loading = ds.query({}, { bust: true });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      release();
+      await loading;
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'Z01', status: 'archived' });
+    });
+
+    it('does not bring back an entity deleted meanwhile', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const loading = ds.query(active, { sort: byName, bust: true });
+      await flush();
+      ds.delete('id02');
+      release();
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id02')).to.equal(undefined);
+      expect(names(results)).to.not.include('A02');
+    });
+
+    it('keeps a set made just after a create and a paged query', async () => {
+      const ds = dataService();
+
+      ds.create({ id: 'id00', name: 'A00', status: 'active' });
+      const loading = ds.query(active, { limit: 10, sort: byName });
+      ds.set('organisation.id00.name', 'B00');
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id00.name')).to.equal('B00');
+      expect(results[0]).to.deep.equal({ id: 'id00', name: 'B00', status: 'active' });
+    });
+  });
+
+  // A resync clears the cache because updates may have been missed. A search sent before it may be missing them too.
+  describe('with the query cache cleared while a search is out', () => {
+    let release: () => void;
+    const clearedWhileOut = async (ds: ButtressDataService, opts: object) => {
+      holdSearches = new Promise((resolve) => {
+        release = resolve;
+      });
+      const loading = ds.query(active, opts);
+      await flush();
+      ds.clearQueryMap();
+      release();
+      return loading;
+    };
+
+    it('searches again for the query', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { sort: byName });
+      await ds.query(active, { sort: byName });
+
+      expect(searches).to.equal(2);
+    });
+
+    it('searches again for the page', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { limit: 10, sort: byName });
+      const { results } = await ds.query(active, { limit: 10, sort: byName });
+
+      expect(searches).to.equal(2);
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
+
+    // Not cached, but still the page Buttress sent, as paged queries always are.
+    it('still returns the page the search found', async () => {
+      const ds = dataService();
+
+      const { results } = await clearedWhileOut(ds, { limit: 10, sort: byName });
+
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
+
+    it('still keeps the entities the search found', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { sort: byName });
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'A01', status: 'active' });
+    });
+  });
+
   it('keeps cached unpaged queries after a create', async () => {
     const ds = dataService();
     await ds.query(active, { sort: byName });
@@ -406,6 +662,81 @@ describe('ButtressDataService query', () => {
     const { results } = await ds.query(active, { sort: byName });
 
     expect(names(results)).to.deep.equal(['A00', ...range(1, 25).filter((n) => n !== 'A03')]);
+  });
+
+  it('sends the sort direction to Buttress', async () => {
+    const ds = dataService();
+
+    const { results } = await ds.query(active, { limit: 3, sort: { path: 'name', direction: 'DESC' } });
+
+    expect(names(results)).to.deep.equal(['A25', 'A24', 'A23']);
+  });
+
+  it('merges an entity the server sends twice', async () => {
+    const ds = dataService();
+    const fetchPage = window.fetch;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'SEARCH' && !new URL(input.toString()).pathname.endsWith('/count')) {
+        return new Response(
+          JSON.stringify([
+            { id: 'id01', name: 'A01' },
+            { id: 'id01', status: 'active' },
+          ]),
+        );
+      }
+      return fetchPage(input, init);
+    };
+
+    const { results } = await ds.query(active, { limit: 10 });
+
+    expect(results).to.deep.equal([{ id: 'id01', name: 'A01', status: 'active' }]);
+  });
+
+  describe('with the query cache cleared while the count is out', () => {
+    // A resync clearing the cache between the search and the count.
+    const clearOnCount = (ds: ButtressDataService) => {
+      const fetchPage = window.fetch;
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new URL(input.toString()).pathname.endsWith('/count')) ds.clearQueryMap();
+        return fetchPage(input, init);
+      };
+    };
+
+    it('returns the page it searched for', async () => {
+      const ds = dataService();
+      clearOnCount(ds);
+
+      const { results, total } = await ds.query(active, { limit: 10 });
+
+      expect(names(results)).to.deep.equal(range(1, 10));
+      expect(total).to.equal(25);
+    });
+
+    it('returns the cached page it was answered from', async () => {
+      const ds = dataService();
+      await ds.query(active, { limit: 10 });
+      clearOnCount(ds);
+
+      const { results } = await ds.query(active, { limit: 10 });
+
+      expect(searches).to.equal(1);
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
+  });
+
+  it('logs the query and throws when the store cannot run it', async () => {
+    const ds = dataService();
+    window.fetch = async (input: RequestInfo | URL) =>
+      new Response(new URL(input.toString()).pathname.endsWith('/count') ? '0' : '[]');
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+
+    const err = await ds.query({ status: null }).catch((e: unknown) => e);
+    console.error = originalError;
+
+    expect(err).to.be.instanceOf(TypeError);
+    expect(logged).to.have.length(1);
   });
 });
 
@@ -460,11 +791,12 @@ describe('ButtressDataService writes', () => {
     Logger.disableLogging = true;
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
-      sent.push({
-        method: init!.method!,
-        path: new URL(input.toString()).pathname.replace('/api/v1/organisation', ''),
-        body,
-      });
+      const path = new URL(input.toString()).pathname.replace('/api/v1/organisation', '');
+      sent.push({ method: init!.method!, path, body });
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (status === 200 && path === '/bulk/update') {
+        return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
+      }
       return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
     };
   });
@@ -673,7 +1005,7 @@ describe('ButtressDataService writes', () => {
     ]);
   });
 
-  it('sends a set of an entity already in the store as updates to the properties that changed', async () => {
+  it('sends a set of an entity already in the store as updates to the values that changed', async () => {
     const ds = withEntity();
     const entity = ds.get('organisation.x');
 
@@ -682,7 +1014,7 @@ describe('ButtressDataService writes', () => {
 
     expect(sent).to.deep.equal([
       { method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } },
-      { method: 'PUT', path: '/x', body: { path: 'address', value: { city: 'York' } } },
+      { method: 'PUT', path: '/x', body: { path: 'address.city', value: 'York' } },
     ]);
   });
 
@@ -702,7 +1034,7 @@ describe('ButtressDataService writes', () => {
     expect(ds.get('organisation.y')).to.equal(undefined);
   });
 
-  it('sends nothing, and resolves dboComplete, for a set inside an object that is not in the store', async () => {
+  it('sends nothing, and resolves dboComplete, for a set inside an entity that is not in the store', async () => {
     const ds = withEntity();
     const { dboComplete, outcome } = tracked();
 
@@ -713,7 +1045,78 @@ describe('ButtressDataService writes', () => {
     expect(outcome()).to.equal('resolved');
   });
 
-  it('still sends and notifies other changes made alongside a set inside an object that is not in the store', async () => {
+  // As Buttress's $set does.
+  it('creates the object missing on the way to a nested set, and sends the set', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', name: 'y' });
+    const { dboComplete, outcome } = tracked();
+
+    expect(ds.set('organisation.y.address.city', 'York', { dboComplete })).to.equal('organisation.y.address.city');
+    await settle(ds);
+
+    expect(ds.get('organisation.y')).to.deep.equal({ id: 'y', name: 'y', address: { city: 'York' } });
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/y', body: { path: 'address.city', value: 'York' } }]);
+    expect(outcome()).to.equal('resolved');
+  });
+
+  it('creates every object missing on the way to a nested set', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x.meta.source.name', 'import');
+    await settle(ds);
+
+    expect(ds.get('organisation.x.meta')).to.deep.equal({ source: { name: 'import' } });
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/x', body: { path: 'meta.source.name', value: 'import' } }]);
+  });
+
+  it('notifies subscribers of a nested set that created the object on the way', async () => {
+    const store = new ButtressStore();
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      store,
+      writeSchema,
+    );
+    store.get('organisation').set('y', { id: 'y' });
+    // Past the notification of the data service setting up its collection.
+    await flush();
+    const notified: unknown[] = [];
+    store.subscribe('organisation.*', (cr: { path: string; value: unknown }) => notified.push([cr.path, cr.value]));
+
+    ds.set('organisation.y.address.city', 'York');
+    await settle(ds);
+
+    expect(notified).to.deep.equal([['organisation.y.address.city', 'York']]);
+  });
+
+  // Buttress can't set a property inside one either.
+  it('throws for a nested set under null, and changes and sends nothing', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', address: null });
+
+    expect(() => ds.set('organisation.y.address.city', 'York')).to.throw(
+      'Unable to set organisation.y.address.city: organisation.y.address is null, not an object',
+    );
+    await settle(ds);
+
+    expect(ds.get('organisation.y')).to.deep.equal({ id: 'y', address: null });
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('throws for a nested set under a value that is not an object, and changes and sends nothing', async () => {
+    const ds = withEntity();
+
+    expect(() => ds.set('organisation.x.name.first', 'b')).to.throw(
+      'Unable to set organisation.x.name.first: organisation.x.name is a string, not an object',
+    );
+    await settle(ds);
+
+    expect(ds.get('organisation.x.name')).to.equal('a');
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('still sends and notifies other changes made alongside a set inside an entity that is not in the store', async () => {
     const store = new ButtressStore();
     const ds = new ButtressDataService(
       'organisation',
@@ -881,5 +1284,484 @@ describe('ButtressDataService writes', () => {
     console.error = originalError;
 
     expect(outcome()).to.equal('rejected');
+  });
+
+  it('throws for a create with the id of an entity in the store', () => {
+    const ds = withEntity();
+
+    expect(() => ds.create({ id: 'x', name: 'b' })).to.throw('Unable to create entity with duplicate id');
+  });
+
+  it('sends nothing for a set of the whole collection', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation', new Map());
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+    expect(ds.get('organisation').size).to.equal(0);
+  });
+
+  it('sends nothing for a set of an entity in the store to null', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation.x', null);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('creates the array, and sends each item, for a splice into an array that is not in the store', async () => {
+    const ds = withEntity();
+    ds.get('organisation').set('y', { id: 'y', contacts: [{ id: 'c1' }] });
+
+    ds.splice('organisation.y.contacts.0.phones', 0, 0, '0113');
+    await settle(ds);
+
+    expect(ds.get('organisation.y.contacts.0.phones')).to.deep.equal(['0113']);
+    expect(sent).to.deep.equal([{ method: 'PUT', path: '/y', body: { path: 'contacts.0.phones', value: '0113' } }]);
+  });
+
+  // A set sends what differs from Buttress's copy, which pushes and splices change as they change the store's.
+  describe('after a push or splice', () => {
+    // Buttress's copy of x is taken when it's loaded, as here from a realtime post.
+    const loaded = () => {
+      const ds = new ButtressDataService(
+        'organisation',
+        false,
+        { endpoint: 'https://example.test', token: 'abc' },
+        new ButtressStore(),
+        writeSchema,
+      );
+      ds.create({ id: 'x', name: 'a', tags: ['a', 'b'] }, { localOnly: true });
+      return ds;
+    };
+
+    it('still sends an item added to the array in place', async () => {
+      const ds = loaded();
+      const tags = ds.get('organisation.x.tags');
+
+      tags.push('in place');
+      ds.push('organisation.x.tags', 'pushed');
+      ds.set('organisation.x.tags', tags);
+      await settle(ds);
+
+      expect(sent.map((r) => r.body)).to.deep.equal([
+        { path: 'tags', value: 'pushed' },
+        { path: 'tags', value: ['a', 'b', 'in place', 'pushed'] },
+      ]);
+    });
+
+    it('does not send the array again', async () => {
+      const ds = loaded();
+
+      ds.push('organisation.x.tags', 'c');
+      ds.splice('organisation.x.tags', 0, 1);
+      ds.splice('organisation.x.tags', 1, 0, 'm');
+      ds.splice('organisation.x.tags', 3, 0, 'z');
+      await settle(ds);
+      const count = sent.length;
+      ds.set('organisation.x', ds.get('organisation.x'));
+      await settle(ds);
+
+      expect(ds.get('organisation.x.tags')).to.deep.equal(['b', 'm', 'c', 'z']);
+      expect(sent.length).to.equal(count);
+    });
+
+    it('sends the whole array again after Buttress refused a remove from it', async () => {
+      const ds = loaded();
+      const originalError = console.error;
+      console.error = () => {};
+      status = 400;
+      ds.splice('organisation.x.tags', 0, 1);
+      await settle(ds);
+      console.error = originalError;
+
+      status = 200;
+      ds.set('organisation.x', ds.get('organisation.x'));
+      await settle(ds);
+
+      expect(sent.map((r) => r.body)).to.deep.equal([
+        { path: 'tags.0.__remove__', value: '' },
+        { path: 'tags', value: ['b'] },
+      ]);
+    });
+  });
+
+  it('takes an entity from a collection set in place of the old one as it is', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation', new Map([['x', { id: 'x', name: 'z' }]]));
+    ds.set('organisation.x', { id: 'x', name: 'z' });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('throws for a push or splice into an entity that is not in the store, and sends nothing', async () => {
+    const ds = withEntity();
+
+    expect(() => ds.push('organisation.missing.tags', 'a')).to.throw(/not in the store/);
+    expect(() => ds.splice('organisation.missing.tags', 0, 0, 'a')).to.throw(/not in the store/);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('passes notifyPath to the store, which reports whether the value changed', () => {
+    const ds = withEntity();
+
+    expect(ds.notifyPath('organisation.x.name', 'b')).to.equal(true);
+    expect(ds.notifyPath('organisation.x.tags', ds.get('organisation.x.tags'))).to.equal(false);
+  });
+
+  it('uses the schema from updateSchema for arrays it creates', () => {
+    const ds = withEntity();
+
+    ds.updateSchema({ name: 'organisation', type: 'collection', properties: { links: { __type: 'array' } } });
+
+    expect(ds.pushExt('organisation.x.links', { localOnly: true }, 'a')).to.equal(1);
+    expect(() => ds.pushExt('organisation.x.address.lines', { localOnly: true }, 'a')).to.throw(/non-array/);
+  });
+});
+
+describe('ButtressDataService getById', () => {
+  let originalFetch: typeof window.fetch;
+  let gets: number;
+  let onGet: () => void;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    gets = 0;
+    onGet = () => {};
+    window.fetch = async (input: RequestInfo | URL) => {
+      gets += 1;
+      onGet();
+      const id = new URL(input.toString()).pathname.split('/').pop();
+      return new Response(JSON.stringify({ id, name: 'from server' }));
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      schema,
+    );
+
+  it('fetches an entity that is not in the store, and keeps it', async () => {
+    const ds = dataService();
+
+    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'from server' });
+    expect(ds.get('organisation.x')).to.deep.equal({ id: 'x', name: 'from server' });
+  });
+
+  it('returns an entity already in the store without fetching it', async () => {
+    const ds = dataService();
+    ds.get('organisation').set('x', { id: 'x', name: 'local' });
+
+    expect(await ds.getById('x')).to.deep.equal({ id: 'x', name: 'local' });
+    expect(gets).to.equal(0);
+  });
+
+  it('keeps, and returns, the entity that reached the store while fetching', async () => {
+    const ds = dataService();
+    const local = { id: 'x', name: 'local' };
+    onGet = () => ds.get('organisation').set('x', local);
+
+    expect(await ds.getById('x')).to.equal(local);
+    expect(ds.get('organisation.x')).to.equal(local);
+  });
+
+  it('does not bring back an entity deleted while fetching it', async () => {
+    const ds = dataService();
+    // It reaches the store, as from a realtime post, and is deleted, while the GET is out.
+    onGet = () => {
+      ds.create({ id: 'x', name: 'local' }, { localOnly: true });
+      ds.delete('x', { localOnly: true });
+    };
+
+    expect(await ds.getById('x')).to.equal(undefined);
+    expect(ds.get('organisation.x')).to.equal(undefined);
+  });
+});
+
+describe('ButtressDataService local sort', () => {
+  const b = { id: 'b', name: 'beta', size: 2, founded: '2001-01-01' };
+  const none = { id: 'none' };
+  const a = { id: 'a', name: 'Alpha', size: 10, founded: '1999-01-01' };
+
+  const sorted = (entities: ButtressEntity[], sort: object) => {
+    const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+    entities.forEach((entity) => ds.get('organisation').set(entity.id, entity));
+    return (ds as any).__filterLocalData({}, sort).map((entity: ButtressEntity) => entity.id);
+  };
+
+  it('sorts strings without regard to case, with missing values first', () => {
+    expect(sorted([b, none, a], { path: 'name', direction: 'ASC' })).to.deep.equal(['none', 'a', 'b']);
+    expect(sorted([b, none, a], { path: 'name', direction: 'DESC' })).to.deep.equal(['b', 'a', 'none']);
+  });
+
+  it('sorts numbers', () => {
+    expect(sorted([a, b], { path: 'size', type: 'NUMBER', direction: 'ASC' })).to.deep.equal(['b', 'a']);
+    expect(sorted([b, a], { path: 'size', type: 'NUMBER', direction: 'DESC' })).to.deep.equal(['a', 'b']);
+  });
+
+  it('sorts dates, with missing values first', () => {
+    expect(sorted([b, none, a], { path: 'founded', type: 'DATE', direction: 'ASC' })).to.deep.equal(['none', 'a', 'b']);
+    expect(sorted([b, none, a], { path: 'founded', type: 'DATE', direction: 'DESC' })).to.deep.equal([
+      'b',
+      'a',
+      'none',
+    ]);
+  });
+});
+
+// Entities arrive from Buttress as JSON, so their dates are ISO strings.
+describe('ButtressDataService date operators on data from Buttress', () => {
+  type Dated = { id: string; founded?: string | null };
+
+  let originalFetch: typeof window.fetch;
+
+  const server: Dated[] = [
+    { id: 'old', founded: '2000-01-01T00:00:00.000Z' },
+    { id: 'mid', founded: '2005-06-15T12:00:00.000Z' },
+    { id: 'new', founded: '2010-01-01T00:00:00.000Z' },
+    { id: 'none' },
+    { id: 'null', founded: null },
+  ];
+  const operand = '2005-06-15T12:00:00.000Z';
+  // As Buttress compares them: as dates, never matching a missing or null one.
+  const compare: Record<string, (a: number, b: number) => boolean> = {
+    $gtDate: (a, b) => a > b,
+    $gteDate: (a, b) => a >= b,
+    $ltDate: (a, b) => a < b,
+    $lteDate: (a, b) => a <= b,
+  };
+  const matches = (entity: Dated, query: { founded?: Record<string, string> }) =>
+    Object.entries(query.founded ?? {}).every(
+      ([operator, date]) =>
+        typeof entity.founded === 'string' &&
+        compare[operator](new Date(entity.founded).getTime(), new Date(date).getTime()),
+    );
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    Logger.disableLogging = true;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string);
+      const found = server.filter((entity) => matches(entity, body.query));
+      if (new URL(input.toString()).pathname.endsWith('/count')) return new Response(JSON.stringify(found.length));
+      return new Response(JSON.stringify(found.slice(body.skip, body.limit ? body.skip + body.limit : undefined)));
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      schema,
+    );
+  const ids = (results: ButtressEntity[]) => results.map((r) => r.id);
+
+  const expected: Record<string, string[]> = {
+    $gtDate: ['new'],
+    $gteDate: ['mid', 'new'],
+    $ltDate: ['old'],
+    $lteDate: ['old', 'mid'],
+  };
+
+  for (const [operator, matching] of Object.entries(expected)) {
+    it(`matches ${operator}`, async () => {
+      const { results, total } = await dataService().query({ founded: { [operator]: operand } });
+
+      expect(ids(results)).to.deep.equal(matching);
+      expect(total).to.equal(matching.length);
+    });
+
+    it(`matches ${operator} for a page`, async () => {
+      const { results } = await dataService().query({ founded: { [operator]: operand } }, { limit: 10 });
+
+      expect(ids(results)).to.deep.equal(matching);
+    });
+
+    it(`skips entities without the date, or with a null one, for ${operator}`, async () => {
+      const ds = dataService();
+      await ds.query({});
+
+      const { results } = await ds.query({ founded: { [operator]: operand } });
+
+      expect(ids(results)).to.deep.equal(matching);
+    });
+  }
+
+  it('matches a range', async () => {
+    const { results } = await dataService().query({
+      founded: { $gteDate: '2000-01-01T00:00:00.000Z', $ltDate: '2010-01-01T00:00:00.000Z' },
+    });
+
+    expect(ids(results)).to.deep.equal(['old', 'mid']);
+  });
+});
+
+describe('ButtressDataService query operators', () => {
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const data = [
+    { id: 'a', name: 'Alpha', tags: ['x', 'y'], founded: new Date('2000-01-01'), links: [new Map([['kind', 'web']])] },
+    { id: 'b', name: 'Beta', tags: ['y'], founded: new Date('2010-01-01'), links: [] },
+    { id: 'c', name: 'Gamma', tags: [], founded: null, links: [] },
+  ];
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  it('matches every part of an $and', () => {
+    expect(ids({ $and: [{ tags: { $eq: 'y' } }, { name: { $eq: 'Beta' } }] })).to.deep.equal(['b']);
+  });
+
+  it('matches any part of an $or, once each', () => {
+    expect(
+      ids({ $or: [{ name: { $eq: 'Gamma' } }, { tags: { $eq: 'y' } }, { name: { $eq: 'Alpha' } }] }),
+    ).to.deep.equal(['c', 'a', 'b']);
+  });
+
+  it('matches $inProp against an array property', () => {
+    expect(ids({ tags: { $inProp: 'x' } })).to.deep.equal(['a']);
+  });
+
+  it('matches dates with $gteDate and $lteDate, including the date itself', () => {
+    expect(ids({ founded: { $gteDate: '2010-01-01' } })).to.deep.equal(['b']);
+    expect(ids({ founded: { $lteDate: '2000-01-01' } })).to.deep.equal(['a']);
+    expect(ids({ founded: { $gteDate: '2000-01-01', $lteDate: '2010-01-01' } })).to.deep.equal(['a', 'b']);
+  });
+
+  it('matches nothing for a date operator with a null operand', () => {
+    for (const operator of ['$gtDate', '$ltDate', '$gteDate', '$lteDate']) {
+      expect(ids({ founded: { [operator]: null } }), operator).to.deep.equal([]);
+    }
+  });
+
+  it('looks up a path through a Map in an array', () => {
+    expect(ids({ 'links.kind': { $eq: 'web' } })).to.deep.equal(['a']);
+  });
+
+  it('finds nothing on a path through a string', () => {
+    expect(ids({ 'name.first': { $exists: true } })).to.deep.equal([]);
+  });
+
+  it('logs an unknown operator and matches nothing', () => {
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+
+    const matched = ids({ name: { $like: 'A' } });
+    console.error = originalError;
+
+    expect(matched).to.deep.equal([]);
+    expect(logged).to.have.length(1);
+  });
+});
+
+// A path into an array matches if any value it reaches does. Each path to an identifier here passes through two
+// arrays: the signatories, and the identifiers of each signatory's person.
+describe('ButtressDataService query operators on nested arrays', () => {
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const identifier = (name: string, age: number, hired: string) => ({ name, age, hired_at: new Date(hired) });
+  const data = [
+    {
+      id: 'first',
+      threshold: 1,
+      signatories: [
+        { person: { identifiers: [identifier('John', 30, '2010-01-10'), identifier('Mary', 20, '2020-07-04')] } },
+      ],
+    },
+    {
+      id: 'second',
+      threshold: 2,
+      signatories: [
+        { person: { identifiers: [identifier('Henry', 50, '2023-10-31')] } },
+        { person: { identifiers: [identifier('James', 60, '2009-03-14')] } },
+      ],
+    },
+    {
+      id: 'third',
+      threshold: 1,
+      signatories: [
+        { person: { identifiers: [{ ...identifier('Anna', 40, '2015-06-01'), email: 'anna@example.com' }] } },
+      ],
+    },
+  ];
+  const identifiers = 'signatories.person.identifiers';
+  const name = `${identifiers}.name`;
+  const age = `${identifiers}.age`;
+  const hiredAt = `${identifiers}.hired_at`;
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  it('matches $eq against a value outside the arrays', () => {
+    expect(ids({ threshold: { $eq: 1 } })).to.deep.equal(['first', 'third']);
+  });
+
+  it('matches $eq against any value in the arrays', () => {
+    expect(ids({ [name]: { $eq: 'James' } })).to.deep.equal(['second']);
+  });
+
+  // So an entity with John and Mary matches $not John. $nin, below, needs every value to differ.
+  it('matches $not when any value differs', () => {
+    expect(ids({ threshold: { $not: 1 } })).to.deep.equal(['second']);
+    expect(ids({ [name]: { $not: 'Anna' } })).to.deep.equal(['first', 'second']);
+    expect(ids({ [name]: { $not: 'John' } })).to.deep.equal(['first', 'second', 'third']);
+  });
+
+  it('matches $gt and $lt against any value in the arrays', () => {
+    expect(ids({ [age]: { $gt: 45 } })).to.deep.equal(['second']);
+    expect(ids({ [age]: { $lt: 25 } })).to.deep.equal(['first']);
+    expect(ids({ [age]: { $gt: 100 } })).to.deep.equal([]);
+  });
+
+  it('matches $gte and $lte against any value in the arrays, including the value itself', () => {
+    expect(ids({ [age]: { $gte: 40 } })).to.deep.equal(['second', 'third']);
+    expect(ids({ [age]: { $lte: 20 } })).to.deep.equal(['first']);
+  });
+
+  it('matches $rex with regard to case, and $rexi without', () => {
+    expect(ids({ [name]: { $rex: 'ry' } })).to.deep.equal(['first', 'second']);
+    expect(ids({ [name]: { $rex: '^j' } })).to.deep.equal([]);
+    expect(ids({ [name]: { $rexi: '^j' } })).to.deep.equal(['first', 'second']);
+  });
+
+  it('matches $in when any value is in the list', () => {
+    expect(ids({ [name]: { $in: ['Mary', 'Anna'] } })).to.deep.equal(['first', 'third']);
+  });
+
+  it('matches $nin only when no value is in the list', () => {
+    expect(ids({ [name]: { $nin: ['Mary', 'James'] } })).to.deep.equal(['third']);
+    expect(ids({ [name]: { $nin: ['Zoe'] } })).to.deep.equal(['first', 'second', 'third']);
+  });
+
+  it('matches $exists when any item in the arrays has the property', () => {
+    expect(ids({ [`${identifiers}.email`]: { $exists: true } })).to.deep.equal(['third']);
+    expect(ids({ [`${identifiers}.email`]: { $exists: false } })).to.deep.equal(['first', 'second']);
+  });
+
+  it('matches $elMatch only when a single item meets every condition', () => {
+    expect(ids({ [identifiers]: { $elMatch: { name: { $eq: 'John' }, age: { $lt: 40 } } } })).to.deep.equal(['first']);
+    // Mary is under 25, but she isn't John.
+    expect(ids({ [identifiers]: { $elMatch: { name: { $eq: 'John' }, age: { $lt: 25 } } } })).to.deep.equal([]);
+  });
+
+  it('matches $gtDate and $ltDate against any date in the arrays', () => {
+    expect(ids({ [hiredAt]: { $gtDate: '2022-01-01T00:00:00.000Z' } })).to.deep.equal(['second']);
+    expect(ids({ [hiredAt]: { $ltDate: '2012-01-01T00:00:00.000Z' } })).to.deep.equal(['first', 'second']);
   });
 });

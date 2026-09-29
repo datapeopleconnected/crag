@@ -255,8 +255,11 @@ realtime updates whose `data.clientSessionId` matches.
   fetches it. Previously a handler for this was added every time the element connected and never removed, so after the
   element had been attached N times, each of these updates caused N fetches.
 - **crag resyncs after a reconnection.** Buttress can't replay the realtime updates sent while the socket had no
-  connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. Listen for it to
-  reload what you're showing. Entities already in the store keep their values until a query fetches them again.
+  connection, so when it connects again crag clears its cached queries and dispatches `bjs-resync`. It does the same
+  when the socket first connects after anything was queried, even a query still out, since what Buttress sent may
+  have changed before the socket joined.
+  Listen for it to reload what you're showing. Entities already in the store keep their values until a query fetches
+  them again.
 - **`core-schema` loads the core schemas again.** Since a change in August 2023, crag sent the list as a request
   header, which Buttress ignores, so no core schemas were loaded. It's now sent in the query string, where
   Buttress reads it. If you set `core-schema`, check that the token can read those schemas.
@@ -281,10 +284,14 @@ realtime updates whose `data.clientSessionId` matches.
 - **`set`, `create` and `delete` send their own requests.** They used to be worked out from the store's change
   notifications a moment later, which went wrong in several ways that are now fixed:
   - a `set` and then a `delete` of the same entity in one go threw an error, and the delete wasn't sent;
-  - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends the
-    top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing;
-  - a `set` inside an object that isn't in the store notified subscribers of a change that never happened, and threw
-    an error that could stop other subscribers hearing about other changes. It now does nothing;
+  - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends each
+    value that differs from what Buttress has, by its full path, and `null` for a property the entity leaves out, so
+    a set replaces the entity. That includes changes made in place to the entity `get()` or a query gave you. The
+    entity's `id` must match the path's, and is filled in if it's missing;
+  - a `set` inside an entity that isn't in the store notified subscribers of a change that never happened, and threw
+    an error that could stop other subscribers hearing about other changes. It now does nothing. Inside an entity
+    that is in the store, a `set` creates any object missing on the way to its path and sends the set, and throws if
+    one on the way is `null` or isn't an object;
   - deleting an entity that isn't in the store threw an error. It now does nothing and returns `false`;
   - `dboComplete` was never called for `localOnly`, `silent` or `forceChanged` writes. It's now called straight away.
 - **`forceChanged` leaves your options alone.** It used to set `localOnly: true` on the options object you passed,

@@ -14,10 +14,10 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import type { Settings } from './helpers.js';
+import { DEFAULT_REQUEST_TIMEOUT, type Settings } from './helpers.js';
 
 // Thrown for a response from Buttress with an error status. A request that gets no response,
-// such as one that fails on the network, rejects with fetch's own error instead.
+// such as one that fails on the network or times out, rejects with fetch's own error instead.
 export class ButtressError extends Error {
   readonly status: number;
 
@@ -52,7 +52,7 @@ export class ButtressClient {
   }
 
   async request<T = any>(method: string, url: string, opts: ButtressRequestOpts = {}): Promise<T> {
-    const { token, clientSessionId } = this._settings;
+    const { token, clientSessionId, requestTimeout = DEFAULT_REQUEST_TIMEOUT } = this._settings;
     if (!token) throw new Error(`Missing setting 'token' while sending ${method} ${url}`);
 
     const qs = new URLSearchParams({ ...opts.query, urq: `${Date.now()}` });
@@ -65,6 +65,8 @@ export class ButtressClient {
         'x-client-session-id': clientSessionId,
       },
       body: opts.body === undefined || opts.body === null ? undefined : JSON.stringify(opts.body),
+      // Otherwise a request that never gets a response holds up every request queued behind it.
+      signal: requestTimeout > 0 ? AbortSignal.timeout(requestTimeout) : undefined,
     });
 
     if (!response.ok) {

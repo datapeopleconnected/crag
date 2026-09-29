@@ -21,7 +21,7 @@ import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, buildSettings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
+import { Settings, buildSettings, Dasherize, DateTime } from './helpers.js';
 
 export interface QueryResult {
   skip?: number;
@@ -48,6 +48,14 @@ export interface QueryOpts {
   actualCount?: boolean;
 }
 
+// The keys of each entity written locally while a search or GET was out, or true for an entity created, replaced or
+// deleted meanwhile.
+type Written = Map<string, Set<string> | true>;
+
+// A value as it's sent to Buttress.
+type Json = null | boolean | number | string | Json[] | JsonObject;
+type JsonObject = { [key: string]: Json };
+
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
 
@@ -70,6 +78,18 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // Bumped by a create: cached pages from an earlier generation are searched for again.
   private __pageGeneration = 0;
+
+  // Bumped when the query cache is cleared: a search sent before then isn't cached when it comes back.
+  private __cacheEpoch = 0;
+
+  // One for each search or GET that's queued or waiting for its response. The response is older than the writes
+  // recorded in it, since Buttress hadn't had them when it answered, so merging it mustn't undo them.
+  private __reads: Set<Written> = new Set();
+
+  // What Buttress has of each entity in the store, as far as crag knows: the entity as it was loaded, with every write
+  // since applied, as JSON. A set sends what differs from this. It can't compare with the entity in the store, since
+  // get(), query results and getById() hand out that object, which an app can change in place.
+  private __synced: Map<string, JsonObject> = new Map();
 
   core: boolean = false;
 
@@ -116,6 +136,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const path = this._store.create(this.name, value, ButtressDataService.__storeOpts(opts));
+    this.__recordWrite(val.id);
+    this.__syncEntity(val.id, value);
     // Only Buttress can say which page a new entity belongs on.
     this.__pageGeneration += 1;
     this.__send(opts, () => [this.__generateAddRequest(value)]);
@@ -130,9 +152,104 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const deleted = this._store.delete(`${this.name}.${id}`, ButtressDataService.__storeOpts(opts));
+    this.__recordWrite(id);
+    this.__synced.delete(id);
     this.__send(opts, () => [this.__generateRmRequest(id)]);
 
     return deleted;
+  }
+
+  // The synced copy of an entity in the store. One put in the store without being loaded or created, as tests do, is
+  // taken as synced as it is.
+  private __syncedEntity(id: string): JsonObject {
+    if (!this.__synced.has(id)) this.__syncEntity(id, this._store.get(`${this.name}.${id}`));
+    return this.__synced.get(id)!;
+  }
+
+  // Takes an entity, as it is now, as what Buttress has of it.
+  private __syncEntity(id: string, entity: ButtressEntity) {
+    this.__synced.set(id, ButtressDataService.__json(entity) as JsonObject);
+  }
+
+  // Sets the value at a path inside an entity's synced copy, creating the objects on the way. Undefined removes it.
+  private __syncAt(id: string, path: string[], value: Json | undefined) {
+    let parent = this.__syncedEntity(id);
+    path.slice(0, -1).forEach((part) => {
+      if (parent[part] === null || typeof parent[part] !== 'object') parent[part] = {};
+      parent = parent[part] as JsonObject;
+    });
+    const last = path[path.length - 1];
+    if (value === undefined) {
+      delete parent[last];
+    } else {
+      parent[last] = value;
+    }
+  }
+
+  // Merges fresh values from Buttress into the synced copy of the entity they were merged into. A new entity, or one
+  // without a copy, starts one, so nothing is kept from the copy of an entity that has since left the store.
+  private __syncFrom(id: string, fresh: ButtressEntity, held: ButtressEntity | undefined) {
+    const synced = held ? this.__synced.get(id) : undefined;
+    if (synced) {
+      Object.assign(synced, ButtressDataService.__json(fresh));
+    } else {
+      this.__syncEntity(id, held ?? fresh);
+    }
+  }
+
+  private static __json(value: unknown): Json | undefined {
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  }
+
+  private static __valueAt(root: Json | undefined, path: string[]): Json | undefined {
+    return path.reduce<Json | undefined>(
+      (value, part) => (value !== null && typeof value === 'object' ? (value as JsonObject)[part] : undefined),
+      root,
+    );
+  }
+
+  // The updates that take Buttress from `before` to `after`, both JSON: the path and value of each value that differs.
+  // Objects are compared key by key, so an edit deep inside one sends just that value, and arrays are sent whole. A key
+  // that `after` doesn't have is sent as null.
+  private static __diff(
+    before: Json | undefined,
+    after: Json | undefined,
+    path: string,
+    updates: [string, Json][] = [],
+  ): [string, Json][] {
+    const isObject = (value: Json | undefined): value is JsonObject =>
+      value !== null && typeof value === 'object' && !Array.isArray(value);
+    if (isObject(before) && isObject(after)) {
+      new Set([...Object.keys(before), ...Object.keys(after)]).forEach((key) => {
+        // An entity's own id is never updated.
+        if (path === '' && key === 'id') return;
+        ButtressDataService.__diff(before[key], after[key], path ? `${path}.${key}` : key, updates);
+      });
+    } else if (JSON.stringify(before) !== JSON.stringify(after)) {
+      updates.push([path, after === undefined ? null : after]);
+    }
+    return updates;
+  }
+
+  // Records a write to an entity, or to one of its top-level keys, for each search or GET that's out.
+  private __recordWrite(id: string, key?: string) {
+    this.__reads.forEach((written) => {
+      const keys = written.get(id);
+      if (keys === true) return;
+      if (key === undefined) {
+        written.set(id, true);
+      } else if (keys) {
+        keys.add(key);
+      } else {
+        written.set(id, new Set([key]));
+      }
+    });
+  }
+
+  private __startRead(): Written {
+    const written: Written = new Map();
+    this.__reads.add(written);
+    return written;
   }
 
   // Data accessors
@@ -142,22 +259,56 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   set(path: string, value: any, opts?: NotifyChangeOpts): string | undefined {
     const parts = path.split('.');
-    if (parts.length === 2) return this.__setEntity(parts[1], value, opts);
+    const [, id, ...entityPath] = parts;
+    if (id === undefined) {
+      // A set of the whole collection is only ever local. Its entities aren't the ones the synced copies were of.
+      this.__synced.clear();
+      const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
+      this.__send(opts, () => []);
+      return setPath;
+    }
+    if (entityPath.length === 0) return this.__setEntity(id, value, opts);
 
-    // Nothing to set inside an object that isn't in the store.
-    const parent = parts.length > 2 ? this._store.get(parts.slice(0, -1).join('.')) : undefined;
-    if (parts.length > 2 && (typeof parent !== 'object' || parent === null)) {
+    // Nothing to set inside an entity that isn't in the store.
+    if (!this._store.get(`${this.name}.${id}`)) {
       opts?.dboComplete?.resolve();
       return undefined;
     }
+    const before = ButtressDataService.__valueAt(this.__syncedEntity(id), entityPath);
+    this.__createParents(parts);
 
-    const changed = this._store.get(path) !== value;
-    const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
-    // A set of the whole collection is only ever local.
-    const entityPath = parts.slice(2).join('.');
-    this.__send(opts, () => (changed && entityPath ? [this.__generateUpdateRequest(parts[1], entityPath, value)] : []));
+    const after = ButtressDataService.__json(value);
+    const updates = ButtressDataService.__diff(before, after, entityPath.join('.'));
+    const old = this._store.get(path);
+    // An object changed in place is the one already in the store, which can't see the change for itself.
+    const storeOpts =
+      old === value && updates.length > 0
+        ? { ...ButtressDataService.__storeOpts(opts), forceChanged: true }
+        : ButtressDataService.__storeOpts(opts);
+    const setPath = this._store.set(path, value, storeOpts);
+    if (old !== value || updates.length > 0) this.__recordWrite(id, entityPath[0]);
+    this.__syncAt(id, entityPath, after);
+    this.__send(opts, () =>
+      updates.map(([updatePath, update]) => this.__generateUpdateRequest(id, updatePath, update)),
+    );
 
     return setPath;
+  }
+
+  // Creates the objects missing on the way to a path inside an entity, as Buttress's $set does. Throws, before changing
+  // anything, for one that is null or isn't an object, since Buttress can't set a property inside that either.
+  private __createParents(parts: string[]) {
+    for (let i = 3; i < parts.length; i += 1) {
+      const parentPath = parts.slice(0, i).join('.');
+      const parent = this._store.get(parentPath);
+      if (parent === undefined) {
+        this._store.set(parentPath, {}, { silent: true });
+      } else if (parent === null || typeof parent !== 'object') {
+        throw new Error(
+          `Unable to set ${parts.join('.')}: ${parentPath} is ${parent === null ? 'null' : `a ${typeof parent}`}, not an object`,
+        );
+      }
+    }
   }
 
   private __setEntity(id: string, value: any, opts?: NotifyChangeOpts): string | undefined {
@@ -170,7 +321,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const existing = this._store.get(`${this.name}.${id}`);
-    const setPath = this._store.set(`${this.name}.${id}`, value, ButtressDataService.__storeOpts(opts));
+    const isEntity = Boolean(value) && typeof value === 'object';
+    // Buttress updates an entity one path at a time, so send each value that differs from what it has.
+    const updates =
+      existing && isEntity
+        ? ButtressDataService.__diff(this.__syncedEntity(id), ButtressDataService.__json(value), '')
+        : [];
+    // The object already in the store can only have changed in place, which the store can't see for itself.
+    const storeOpts =
+      existing && value === existing
+        ? { ...ButtressDataService.__storeOpts(opts), forceChanged: true }
+        : ButtressDataService.__storeOpts(opts);
+    const setPath = this._store.set(`${this.name}.${id}`, value, storeOpts);
+    this.__recordWrite(id);
+    if (isEntity) {
+      this.__syncEntity(id, value);
+    } else {
+      this.__synced.delete(id);
+    }
 
     if (!existing) {
       this.__pageGeneration += 1;
@@ -178,11 +346,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
       return setPath;
     }
 
-    // Buttress updates an entity one path at a time, so send the top-level properties that changed.
-    const changed = Object.keys(value || {}).filter(
-      (key) => key !== 'id' && JSON.stringify(value[key]) !== JSON.stringify(existing[key]),
+    this.__send(opts, () =>
+      updates.map(([updatePath, update]) => this.__generateUpdateRequest(id, updatePath, update)),
     );
-    this.__send(opts, () => changed.map((key) => this.__generateUpdateRequest(id, key, value[key])));
 
     return setPath;
   }
@@ -222,12 +388,25 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   pushExt(path: string, opts?: NotifyChangeOpts, ...items: any[]): number {
     if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const [, id, ...arrayPath] = path.split('.');
+    const synced = this.__syncedArray(id, arrayPath);
     const length = this._store.pushExt(path, this._schema, ButtressDataService.__storeOpts(opts), ...items);
 
-    const [, id, ...arrayPath] = path.split('.');
+    if (items.length > 0) {
+      this.__recordWrite(id, arrayPath[0]);
+      this.__syncAt(id, arrayPath, [...synced, ...(ButtressDataService.__json(items) as Json[])]);
+    }
     this.__send(opts, () => items.map((item) => this.__generateUpdateRequest(id, arrayPath.join('.'), item)));
 
     return length;
+  }
+
+  // The synced copy of an array inside an entity in the store, or an empty one.
+  private __syncedArray(id: string, path: string[]): Json[] {
+    const synced = this._store.get(`${this.name}.${id}`)
+      ? ButtressDataService.__valueAt(this.__syncedEntity(id), path)
+      : undefined;
+    return Array.isArray(synced) ? [...synced] : [];
   }
 
   // splice(path, start) removes to the end, as Array.prototype.splice does.
@@ -243,6 +422,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const index = from < 0 ? Math.max(length + from, 0) : Math.min(from, length);
 
     if (ButtressDataService.__sends(opts)) ButtressDataService.__giveIds(items);
+    const [, id, ...rest] = path.split('.');
+    const synced = this.__syncedArray(id, rest);
     const removed = this._store.spliceExt(
       path,
       this._schema,
@@ -252,13 +433,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
       ...items,
     );
 
-    const [, id, ...rest] = path.split('.');
     const arrayPath = rest.join('.');
+    const appends = removed.length === 0 && index === length;
+    if (removed.length > 0 || items.length > 0) {
+      this.__recordWrite(id, rest[0]);
+      // As Buttress applies what's sent: the removes or appends to its own copy, or else the whole array.
+      if (items.length === 0) {
+        synced.splice(index, removed.length);
+        this.__syncAt(id, rest, synced);
+      } else {
+        const array = appends ? [...synced, ...items] : this._store.get(path);
+        this.__syncAt(id, rest, ButtressDataService.__json(array));
+      }
+    }
     this.__send(opts, () => {
       // Each remove shifts the items after it down, so every one is at the same index.
       if (items.length === 0)
         return removed.map(() => this.__generateUpdateRequest(id, `${arrayPath}.${index}.__remove__`, ''));
-      if (removed.length === 0 && index === length) {
+      if (appends) {
         return items.map((item) => this.__generateUpdateRequest(id, arrayPath, item));
       }
       // Buttress can only append to an array or remove from it, so anything else sends the whole array.
@@ -279,38 +471,50 @@ export default class ButtressDataService implements ButtressStoreInterface {
   async getById(id: string) {
     const storeEntity = this.get(`${this.name}.${id}`);
     if (storeEntity) return storeEntity;
-    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
 
-    const entity = await this.__generateGetByIdRequest(id);
+    const written = this.__startRead();
+    try {
+      const entity = await this.__generateGetByIdRequest(id);
 
-    if (this._store.get(`${this.name}.${entity.id}`)) return entity;
+      // If it reached the store while the request was out, anything else holding it holds the store's object.
+      const arrived = this._store.get(`${this.name}.${entity.id}`);
+      if (arrived) return arrived;
+      // It was in the store while the request was out, and has been deleted since.
+      if (written.has(entity.id)) return undefined;
 
-    this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
-      silent: true,
-    });
+      this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
+        silent: true,
+      });
+      this.__syncEntity(entity.id, entity);
 
-    return entity;
+      return entity;
+    } finally {
+      this.__reads.delete(written);
+    }
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
-    if (!this._settings) throw new Error('Unable to call query, setttings is still undefined');
-
     // Fetches the matching entities into the local store, unless this search is cached.
-    await this.search(buttressQuery, opts);
+    const found = await this.search(buttressQuery, opts);
+    // The ids of the page: those this search found, or else the cached ones, which search() only answers from when it
+    // has them. Taken now, since a resync can clear the cache while the count is out, and a search that was out when
+    // the cache was cleared isn't cached.
+    const pageIds = found
+      ? ButtressDataService.__ids(found)
+      : this._queryCache.get(this.__queryKey(buttressQuery, opts))!.ids;
 
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
     const paged = ButtressDataService.__isPaged(opts);
-    const results = paged ? this.__cachedPage(buttressQuery, opts) : this.__filterLocalData(buttressQuery, opts?.sort);
+    const results = paged ? this.__page(buttressQuery, pageIds) : this.__filterLocalData(buttressQuery, opts?.sort);
 
     return { skip: opts?.skip, limit: opts?.limit, total, results };
   }
 
   // A page can't be cut from the store, which may hold matches the server left off it, so a
   // page is the entities the server sent, less any since deleted or changed so they don't match.
-  private __cachedPage(buttressQuery: any, opts?: QueryOpts): ButtressEntity[] {
-    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts))?.ids || [];
+  private __page(buttressQuery: any, ids: string[]): ButtressEntity[] {
     const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
     // _processQueryPart can reorder the entities ($or does), so keep the server's order.
     const matching = new Set(this.__matchLocally(buttressQuery, entities));
@@ -436,8 +640,15 @@ export default class ButtressDataService implements ButtressStoreInterface {
   };
 
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    // Each operator takes its operand and returns the filter for it (the date ones return false for a null operand).
-    const fns: { [key: string]: (rhs: any) => ((lhs: any) => boolean) | false } = {
+    // A date operator compares times. DateTime gives NaN for a value that isn't a date, such as a missing or null one,
+    // and NaN compares false, so those never match, and an operand that isn't a date matches nothing.
+    const dateOperator = (matches: (time: number, operandTime: number) => boolean) => (rhs: any) => {
+      const operandTime = DateTime(rhs);
+      return (lhs: any) => this.__parsePath(lhs, field).some((val) => matches(DateTime(val), operandTime));
+    };
+
+    // Each operator takes its operand and returns the filter for it.
+    const fns: { [key: string]: (rhs: any) => (lhs: any) => boolean } = {
       $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
       $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
       $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,
@@ -458,46 +669,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
       },
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
       $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
-      $gtDate: (rhs: any) => {
-        if (rhs === null) return false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsBefore(rhsDate, val);
-          }) !== -1;
-      },
-      $ltDate: (rhs: any) => {
-        if (rhs === null) return false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsAfter(rhsDate, val);
-          }) !== -1;
-      },
-      $gteDate: (rhs: any) => {
-        if (rhs === null) return false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
-          }) !== -1;
-      },
-      $lteDate: (rhs: any) => {
-        if (rhs === null) return false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
-          }) !== -1;
-      },
+      $gtDate: dateOperator((time, operandTime) => time > operandTime),
+      $ltDate: dateOperator((time, operandTime) => time < operandTime),
+      $gteDate: dateOperator((time, operandTime) => time >= operandTime),
+      $lteDate: dateOperator((time, operandTime) => time <= operandTime),
     };
 
     if (!fns[operator]) {
@@ -509,11 +684,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
-    if (!this._settings) return undefined;
-
     const key = this.__queryKey(buttressQuery, opts);
     const paged = ButtressDataService.__isPaged(opts);
     const generation = this.__pageGeneration;
+    const epoch = this.__cacheEpoch;
     const cached = this._queryCache.get(key);
     if (!opts?.bust && cached && (!cached.paged || cached.generation === generation)) {
       return false;
@@ -525,33 +699,49 @@ export default class ButtressDataService implements ButtressStoreInterface {
       sort[opts.sort.path] = opts.sort.direction === 'ASC' ? 1 : -1;
     }
 
-    const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
+    const written = this.__startRead();
+    try {
+      const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
-    // Filter out any objects which exists in the local store
-    // const filteredBody =body.filter((o: any) => !this._store.get(`${this.name}.${o.id}`));
-    const newMapArrMap: [string, ButtressEntity][] = [];
+      const entities: Map<string, ButtressEntity> = this.get(this.name);
+      const added: Map<string, ButtressEntity> = new Map();
+      for (const o of body) {
+        const keys = written.get(o.id);
+        // Created, replaced or deleted while the search was out.
+        if (keys === true) continue;
+        const fresh = keys ? ButtressDataService.__without(o, keys) : o;
+        // Merged into the object already in the store, so anything holding it sees the fresh values.
+        const held = added.get(o.id) ?? entities.get(o.id);
+        if (held) {
+          Object.assign(held, fresh);
+        } else {
+          added.set(o.id, fresh);
+        }
+        this.__syncFrom(o.id, fresh, held);
+      }
 
-    for (const o of body) {
-      const idx = newMapArrMap.findIndex((n) => n[0] === o.id);
-      if (idx !== -1) {
-        newMapArrMap[idx] = [o.id, { ...newMapArrMap[idx][1], ...o }];
-        continue;
+      this._store.set(this.name, new Map([...entities, ...added]), {
+        silent: true,
+      });
+      // The generation from when the search was sent, so a create while it was out makes this page stale. A search
+      // that was out when the cache was cleared, as it is by a resync, may be missing the changes the resync is for.
+      if (epoch === this.__cacheEpoch) {
+        this._queryCache.set(key, { ids: ButtressDataService.__ids(body), paged, generation });
       }
-      const existing = this._store.get(`${this.name}.${o.id}`);
-      if (!existing) {
-        newMapArrMap.push([o.id, o]);
-        continue;
-      }
-      newMapArrMap.push([o.id, { ...existing, ...o }]);
+
+      return body;
+    } finally {
+      this.__reads.delete(written);
     }
+  }
 
-    this._store.set(this.name, new Map([...this.get(this.name), ...newMapArrMap]), {
-      silent: true,
-    });
-    // The generation from when the search was sent, so a create while it was out makes this page stale.
-    this._queryCache.set(key, { ids: newMapArrMap.map(([id]) => id), paged, generation });
+  // The ids of the entities a search found, in the order Buttress sent them, each once.
+  private static __ids(entities: ButtressEntity[]): string[] {
+    return [...new Set(entities.map((entity) => entity.id))];
+  }
 
-    return body;
+  private static __without(entity: ButtressEntity, keys: Set<string>): ButtressEntity {
+    return Object.fromEntries(Object.entries(entity).filter(([key]) => !keys.has(key))) as ButtressEntity;
   }
 
   async count(buttressQuery: any, actualCount?: boolean): Promise<number> {
@@ -560,6 +750,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   clearQueryMap() {
     this._queryCache.clear();
+    this.__cacheEpoch += 1;
+  }
+
+  // Whether anything has been queried or fetched: whether it holds any entities or cached queries, or has a search or
+  // GET out.
+  hasQueried(): boolean {
+    return this.get(this.name).size > 0 || this._queryCache.size > 0 || this.__reads.size > 0;
   }
 
   nextIdle(): Promise<boolean> {
@@ -603,13 +800,20 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   private __generateUpdateRequest(entityId: string, path: string, value: unknown): Promise<void> {
-    return this._queue.push({
+    const request = this._queue.push<void>({
       type: 'update',
       method: 'PUT',
       url: this.getUrl(entityId),
       entityId,
       body: { path, value },
     });
+    // Buttress didn't take it, so what it has there is unknown, and a later set of that value is sent again. For a
+    // remove from an array, that's the whole array.
+    request.catch(() => {
+      if (this.__synced.has(entityId))
+        this.__syncAt(entityId, path.replace(/\.\d+\.__remove__$/, '').split('.'), undefined);
+    });
+    return request;
   }
 
   getUrl(...parts: string[]) {

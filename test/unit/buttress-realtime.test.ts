@@ -96,9 +96,9 @@ describe('ButtressRealtime', () => {
   });
 
   describe('resync', () => {
-    const setup = () => {
+    const setup = (loaded = false) => {
       const calls: string[] = [];
-      const store = { clearQueryMaps: () => calls.push('clearQueryMaps') };
+      const store = { clearQueryMaps: () => calls.push('clearQueryMaps'), hasQueried: () => loaded };
       const settings = buildSettings({});
       settings.endpoint = 'http://127.0.0.1:1';
       settings.token = 'abc';
@@ -112,13 +112,25 @@ describe('ButtressRealtime', () => {
       return { realtime, calls, connected, resyncs: () => calls.filter((c) => c === 'bjs-resync').length };
     };
 
-    it('does not resync on the first connection', () => {
+    it('does not resync on the first connection when nothing has been queried', () => {
       const { realtime, connected, resyncs } = setup();
 
       realtime.connect();
       connected();
 
       expect(resyncs()).to.equal(0);
+      realtime.disconnect();
+    });
+
+    // Buttress sends no update for a change made before the socket joined.
+    it('resyncs on the first connection when something was queried before it', () => {
+      const { realtime, calls, connected, resyncs } = setup(true);
+
+      realtime.connect();
+      connected();
+
+      expect(resyncs()).to.equal(1);
+      expect(calls.indexOf('clearQueryMaps')).to.be.lessThan(calls.indexOf('bjs-resync'));
       realtime.disconnect();
     });
 
@@ -240,6 +252,433 @@ describe('ButtressRealtime', () => {
 
       expect(() => post('unknown')).to.not.throw();
       expect(created).to.deep.equal([]);
+    });
+  });
+
+  it('names the endpoint when the endpoint is missing', () => {
+    const realtime = new ButtressRealtime(
+      {} as any,
+      buildSettings({ token: 'abc' }),
+      () => {},
+      () => {},
+    );
+
+    expect(() => realtime.connect()).to.throw(/'endpoint'/);
+  });
+
+  it("connects to the app's namespace when apiPath is set", () => {
+    const realtime = new ButtressRealtime(
+      {} as any,
+      buildSettings({ endpoint: 'http://127.0.0.1:1', token: 'abc', apiPath: 'app' }),
+      () => {},
+      () => {},
+    );
+
+    realtime.connect();
+
+    expect((realtime as any)._socket.nsp).to.equal('/app');
+    realtime.disconnect();
+  });
+
+  describe('connection events', () => {
+    const setup = () => {
+      const events: { type: string; detail: unknown }[] = [];
+      const realtime = new ButtressRealtime(
+        {} as any,
+        buildSettings({ endpoint: 'http://127.0.0.1:1', token: 'abc' }),
+        (type: string, init: CustomEventInit) => events.push({ type, detail: init.detail }),
+        () => {},
+      );
+      return { realtime, events };
+    };
+
+    it('dispatches bjs-connection-changed with false when the socket disconnects', () => {
+      const { realtime, events } = setup();
+      realtime.connect();
+      events.length = 0;
+
+      (realtime as any)._onDisconnected();
+
+      expect(events).to.deep.equal([{ type: 'bjs-connection-changed', detail: false }]);
+      realtime.disconnect();
+    });
+
+    describe('when the socket fails', () => {
+      let logged: string[];
+      let originalError: typeof console.error;
+      let originalWarn: typeof console.warn;
+
+      beforeEach(() => {
+        logged = [];
+        originalError = console.error;
+        originalWarn = console.warn;
+        console.error = (...args: unknown[]) => logged.push(`error ${JSON.stringify(args)}`);
+        console.warn = (...args: unknown[]) => logged.push(`warn ${JSON.stringify(args)}`);
+      });
+
+      afterEach(() => {
+        console.error = originalError;
+        console.warn = originalWarn;
+      });
+
+      const connectedTo = (apiPath: string) => {
+        const events: { type: string; detail: unknown }[] = [];
+        const realtime = new ButtressRealtime(
+          { clearQueryMaps: () => {}, hasQueried: () => false } as any,
+          buildSettings({ endpoint: 'http://127.0.0.1:1', token: 'abc', apiPath }),
+          (type: string, init: CustomEventInit) => events.push({ type, detail: init.detail }),
+          () => {},
+        );
+        realtime.connect();
+        return { realtime, events, socket: (realtime as any)._socket };
+      };
+      const connectionChanges = (events: { type: string; detail: unknown }[]) =>
+        events.filter((e) => e.type === 'bjs-connection-changed').map((e) => e.detail);
+
+      // As socket.io handles Buttress refusing a token on another app's namespace: it gives up for good.
+      it('reports a connection Buttress refuses, logs it, and closes the socket', () => {
+        const { realtime, events, socket } = connectedTo('other-app');
+
+        socket.onpacket({ type: 4, nsp: '/other-app', data: { message: 'invalid-namespace' } });
+
+        expect(connectionChanges(events)).to.deep.equal([true, false]);
+        expect(socket.active).to.equal(false);
+        expect(realtime.isOpen).to.equal(false);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^error .*invalid-namespace/);
+      });
+
+      // Nothing listens on port 1, so the connection fails, and socket.io tries again later.
+      it('reports a connection that fails once, and leaves socket.io to try again', async () => {
+        const { realtime, events, socket } = connectedTo('app');
+
+        await new Promise((resolve) => {
+          socket.once('connect_error', resolve);
+        });
+        socket.emitReserved('connect_error', new Error('xhr poll error'));
+
+        expect(connectionChanges(events)).to.deep.equal([true, false]);
+        expect(socket.active).to.equal(true);
+        expect(realtime.isOpen).to.equal(true);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^warn /);
+        realtime.disconnect();
+      });
+
+      // As socket.io handles Buttress closing the connection, as it does for a token that's been deleted.
+      it('reports a connection Buttress closes, logs it, and closes the socket', () => {
+        const { realtime, events, socket } = connectedTo('app');
+        (realtime as any)._onConnected();
+
+        socket.onpacket({ type: 1, nsp: '/app' });
+
+        expect(connectionChanges(events)).to.deep.equal([true, true, false]);
+        expect(realtime.isOpen).to.equal(false);
+        expect(logged).to.have.length(1);
+        expect(logged[0]).to.match(/^warn /);
+      });
+    });
+
+    // socket.io shares one connection between the namespaces on an endpoint, with the options of the first.
+    it('connects with its own token when another is connected to the same endpoint', () => {
+      const connect = (token: string, apiPath: string) => {
+        const realtime = new ButtressRealtime(
+          {} as any,
+          buildSettings({ endpoint: 'http://127.0.0.1:1', token, apiPath }),
+          () => {},
+          () => {},
+        );
+        realtime.connect();
+        return realtime;
+      };
+      // The token a socket sends: its own auth, or else its connection's query.
+      const tokenSent = (realtime: ButtressRealtime) => {
+        const socket = (realtime as any)._socket;
+        return socket.auth?.token ?? socket.io.opts.query?.token;
+      };
+
+      const first = connect('one', 'app-one');
+      const second = connect('two', 'app-two');
+
+      expect([tokenSent(first), tokenSent(second)]).to.deep.equal(['one', 'two']);
+      expect((first as any)._socket.io === (second as any)._socket.io).to.equal(false);
+      first.disconnect();
+      second.disconnect();
+    });
+
+    it('reports a disconnection, and logs the error, when the socket cannot be set up', () => {
+      const { realtime, events } = setup();
+      const originalError = console.error;
+      const logged: unknown[] = [];
+      console.error = (...args: unknown[]) => logged.push(args);
+      (realtime as any)._configureRxEvents = () => {
+        throw new Error('broken');
+      };
+
+      realtime.connect();
+      console.error = originalError;
+
+      expect(events).to.deep.equal([
+        { type: 'bjs-connection-changed', detail: true },
+        { type: 'bjs-connection-changed', detail: false },
+      ]);
+      expect(logged).to.have.length(1);
+      realtime.disconnect();
+    });
+  });
+
+  // Applies db-activity payloads to a fake store that holds organisation x, and records what it's asked to do.
+  describe('payloads', () => {
+    let originalWarn: typeof console.warn;
+
+    beforeEach(() => {
+      originalWarn = console.warn;
+      console.warn = () => {};
+    });
+
+    afterEach(() => {
+      console.warn = originalWarn;
+    });
+
+    // `overrides` replaces the store's set, or the element's loadById.
+    const setup = (overrides: { set?: (...args: unknown[]) => unknown; loadById?: () => unknown } = {}) => {
+      const calls: unknown[][] = [];
+      const loaded: unknown[] = [];
+      const events: string[] = [];
+      const data: { [path: string]: unknown } = {
+        organisation: new Map(),
+        'organisation.x': { id: 'x', name: 'a', count: 1 },
+        'organisation.x.count': 1,
+      };
+      const store = {
+        localName: (name: string) => name,
+        get: (path: string) => data[path],
+        set: overrides.set ?? ((...args: unknown[]) => calls.push(['set', ...args])),
+        create: (...args: unknown[]) => calls.push(['create', ...args]),
+        delete: (...args: unknown[]) => calls.push(['delete', ...args]),
+        pushExt: (...args: unknown[]) => calls.push(['pushExt', ...args]),
+        spliceExt: (...args: unknown[]) => calls.push(['spliceExt', ...args]),
+      };
+      const realtime = new ButtressRealtime(
+        store as any,
+        buildSettings({}),
+        (type: string) => events.push(type),
+        overrides.loadById ?? ((detail: unknown) => loaded.push(detail)),
+      );
+      const receive = (verb: string, path: string, response: unknown, extra: object = {}) =>
+        (realtime as any)._parsePayload({
+          schemaName: 'organisation',
+          verb,
+          path,
+          pathSpec: path.replace(/\/[^/]+$/, '/:id'),
+          response,
+          ...extra,
+        });
+      return { data, calls, loaded, events, receive };
+    };
+
+    const local = { localOnly: true };
+
+    it('merges a post into an entity already in the store', () => {
+      const { calls, receive } = setup();
+
+      receive('post', 'organisation', { id: 'x', name: 'b' });
+
+      expect(calls).to.deep.equal([['set', 'organisation.x', { id: 'x', name: 'b', count: 1 }, local]]);
+    });
+
+    it('creates each entity in a post of several', () => {
+      const { calls, receive } = setup();
+
+      receive('post', 'organisation', [{ id: 'y' }, { id: 'z' }]);
+
+      expect(calls).to.deep.equal([
+        ['create', 'organisation', { id: 'y' }, local],
+        ['create', 'organisation', { id: 'z' }, local],
+      ]);
+    });
+
+    it('sets a scalar update', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'scalar', path: 'name', value: 'b' });
+
+      expect(calls).to.deep.equal([['set', 'organisation.x.name', 'b', local]]);
+    });
+
+    it('adds an increment to the value in the store', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'scalar-increment', path: 'count.__increment__', value: 2 });
+
+      expect(calls).to.deep.equal([['set', 'organisation.x.count', 3, local]]);
+    });
+
+    it('pushes a vector-add update', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'vector-add', path: 'tags', value: 'c' });
+
+      expect(calls).to.deep.equal([['pushExt', 'organisation.x.tags', local, 'c']]);
+    });
+
+    it('splices a vector-rm update', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'vector-rm', path: 'tags', value: { index: 1, numRemoved: 2 } });
+
+      expect(calls).to.deep.equal([['spliceExt', 'organisation.x.tags', 1, 2, local]]);
+    });
+
+    it('ignores an update of a type it does not know', () => {
+      const { calls, loaded, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'unknown', path: 'name', value: 'b' });
+
+      expect(calls).to.deep.equal([]);
+      expect(loaded).to.deep.equal([]);
+    });
+
+    it('sets the whole entity for an update without a path', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', { type: 'scalar', value: { id: 'x' } });
+
+      expect(calls).to.deep.equal([['set', 'organisation.x', { id: 'x' }, local]]);
+    });
+
+    it('applies each update in a list', () => {
+      const { calls, receive } = setup();
+
+      receive('put', 'organisation/x', [
+        { type: 'scalar', path: 'name', value: 'b' },
+        { type: 'scalar', path: 'status', value: 'c' },
+      ]);
+
+      expect(calls).to.deep.equal([
+        ['set', 'organisation.x.name', 'b', local],
+        ['set', 'organisation.x.status', 'c', local],
+      ]);
+    });
+
+    it('applies a bulk update to the entity each result names', () => {
+      const { calls, receive } = setup();
+
+      receive('post', 'organisation/bulk/update', [
+        { id: 'x', results: [{ type: 'scalar', path: 'name', value: 'b' }] },
+      ]);
+
+      expect(calls).to.deep.equal([['set', 'organisation.x.name', 'b', local]]);
+    });
+
+    it('loads an entity that is not in the store when an update for it arrives', () => {
+      const { calls, loaded, events, receive } = setup();
+
+      receive('put', 'organisation/y', { type: 'scalar', path: 'name', value: 'b' });
+
+      expect(calls).to.deep.equal([]);
+      expect(loaded).to.deep.equal([{ schemaName: 'organisation', id: 'y' }]);
+      expect(events).to.deep.equal(['dataservice:loadById']);
+    });
+
+    // Nothing waits for these, so a failure must be logged rather than left as an unhandled rejection.
+    describe('when applying an update fails', () => {
+      let uncaught: unknown[];
+      let logged: unknown[];
+      let originalError: typeof console.error;
+      const onRejection = (event: PromiseRejectionEvent) => {
+        uncaught.push(event.reason);
+      };
+      // Long enough for the browser to report an unhandled rejection.
+      const settled = () =>
+        new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+
+      beforeEach(() => {
+        uncaught = [];
+        logged = [];
+        window.addEventListener('unhandledrejection', onRejection);
+        originalError = console.error;
+        console.error = (...args: unknown[]) => logged.push(args);
+      });
+
+      afterEach(() => {
+        window.removeEventListener('unhandledrejection', onRejection);
+        console.error = originalError;
+      });
+
+      it('logs a failed load of the entity an update arrived for', async () => {
+        const { receive } = setup({ loadById: () => Promise.reject(new Error('not found')) });
+
+        receive('put', 'organisation/y', { type: 'scalar', path: 'name', value: 'b' });
+        await settled();
+
+        expect(uncaught).to.deep.equal([]);
+        expect(JSON.stringify(logged)).to.contain('organisation y');
+      });
+
+      it('logs a result that fails, and applies the others', async () => {
+        const applied: unknown[] = [];
+        const { receive } = setup({
+          set: (path: unknown) => {
+            if (path === 'organisation.x.name') throw new Error('cannot set');
+            applied.push(path);
+          },
+        });
+
+        receive('put', 'organisation/x', [
+          { type: 'scalar', path: 'name', value: 'b' },
+          { type: 'scalar', path: 'status', value: 'c' },
+        ]);
+        await settled();
+
+        expect(applied).to.deep.equal(['organisation.x.status']);
+        expect(uncaught).to.deep.equal([]);
+        expect(logged).to.have.length(1);
+      });
+    });
+
+    it('loads the entity when an update arrives before its collection is in the store', () => {
+      const { data, loaded, receive } = setup();
+      delete data.organisation;
+
+      receive('put', 'organisation/x', { type: 'scalar', path: 'name', value: 'b' });
+
+      expect(loaded).to.deep.equal([{ schemaName: 'organisation', id: 'x' }]);
+    });
+
+    it('deletes an entity in the store', () => {
+      const { calls, receive } = setup();
+
+      receive('delete', 'organisation/x', {});
+
+      expect(calls).to.deep.equal([['delete', 'organisation', 'x', local]]);
+    });
+
+    it('ignores a delete of an entity that is not in the store', () => {
+      const { calls, receive } = setup();
+
+      receive('delete', 'organisation/y', {});
+
+      expect(calls).to.deep.equal([]);
+    });
+
+    it('deletes each entity in a bulk delete that is in the store', () => {
+      const { calls, receive } = setup();
+
+      receive('post', 'organisation/bulk/delete', [{ id: 'x' }, { id: 'y' }]);
+
+      expect(calls).to.deep.equal([['delete', 'organisation', 'x', local]]);
+    });
+
+    it('leaves the store alone for a delete of every entity', () => {
+      const { calls, receive } = setup();
+
+      receive('delete', 'organisation', {});
+      receive('delete', 'organisation/x', {}, { isBulkDelete: true });
+
+      expect(calls).to.deep.equal([]);
     });
   });
 });

@@ -38,6 +38,8 @@ import { Settings, buildSettings, coreSchemaLocalName } from './helpers.js';
 export interface customButtressStoreInterface extends ButtressStoreInterface {
   clearQueryMaps: () => void;
   localName: (schemaName: string) => string | undefined;
+  // Whether anything has been queried or fetched, including a search or GET still out.
+  hasQueried: () => boolean;
 }
 
 export interface WriteOpts extends NotifyChangeOpts {
@@ -65,12 +67,13 @@ export interface EventDataDataServiceLoadById {
  * @attr log-disable - Turns off the element's own log lines. Errors are still printed.
  *
  * @fires {CustomEvent<boolean>} bjs-connection-changed - With `true` when `connect()` opens the realtime socket, then
- * whenever the socket connects (`true`) or disconnects (`false`).
+ * whenever the socket connects (`true`) or disconnects (`false`), and with `false` when it can't connect. A socket
+ * Buttress refuses or closes is logged and closed.
  * @fires {CustomEvent<EventDataDataServiceLoadById>} dataservice:loadById - When a realtime update arrives for an
  * entity that isn't in the store. The element fetches the entity itself; the event is for information.
  * @fires {CustomEvent} bjs-resync - When the realtime socket connects again after losing its connection, or after the
- * element was moved in the DOM. Updates sent in the meantime are lost, so cached queries have been cleared: query
- * again to reload what you're showing.
+ * element was moved in the DOM, and when it first connects after anything was queried, even a query still out. Updates
+ * sent in the meantime are lost, so cached queries have been cleared: query again to reload what you're showing.
  */
 export class ButtressDbService extends LitElement {
   static is = 'buttress-db-service';
@@ -98,6 +101,10 @@ export class ButtressDbService extends LitElement {
 
   @property({ type: Array, attribute: 'core-schema' })
   coreSchema?: Array<string>;
+
+  /** Milliseconds a request to Buttress may take before it fails. Defaults to a minute; 0 means no limit. */
+  @property({ type: Number, attribute: 'request-timeout' })
+  requestTimeout?: number;
 
   @property({ type: String, attribute: 'loglevel' })
   logLevel: string = 'info';
@@ -163,6 +170,7 @@ export class ButtressDbService extends LitElement {
       notifyPath: (path: string, value: any, opts?: NotifyChangeOpts): boolean =>
         this._getDataService(path).notifyPath(path, value, opts),
       clearQueryMaps: () => Object.values(this._dataServices).forEach((ds) => ds.clearQueryMap()),
+      hasQueried: () => Object.values(this._dataServices).some((ds) => ds.hasQueried()),
       localName: (schemaName: string) =>
         Object.keys(this._schema || {}).find((name) => this._schema?.[name].name === schemaName),
     };
@@ -184,6 +192,7 @@ export class ButtressDbService extends LitElement {
     this._settings.apiPath = this.apiPath ?? this._settings.apiPath;
     this._settings.userId = this.userId ?? this._settings.userId;
     this._settings.coreSchema = this.coreSchema ?? this._settings.coreSchema ?? [];
+    this._settings.requestTimeout = this.requestTimeout ?? this._settings.requestTimeout;
 
     if (this._reopenRealtime) {
       this._reopenRealtime = false;
@@ -251,23 +260,12 @@ export class ButtressDbService extends LitElement {
     await this._realtime.connect();
   }
 
+  // connect() has checked the settings.
   private async _connect() {
     this._connected = false;
-    if (!this._settings?.endpoint) {
-      throw new Error(`Missing setting 'endpoint' while trying to connect to buttress`);
-    }
-    if (!this._settings?.token) {
-      throw new Error(`Missing setting 'token' while trying to connect`);
-    }
 
-    // Test the connection to buttress
-
-    // Kick off realtime sync
-
-    await this._fetchAppSchema();
-    // TODO: Handle errors
-
-    await this._refreshLocalDataServices();
+    this._schema = await this._fetchAppSchema();
+    this._refreshLocalDataServices(this._schema);
 
     this._connected = true;
     this._settleAwaitingConnection();
@@ -280,32 +278,29 @@ export class ButtressDbService extends LitElement {
     waiting.forEach(({ resolve, reject }) => (failure ? reject(failure.err) : resolve()));
   }
 
-  private async _fetchAppSchema() {
+  // The app's schemas, keyed by local name.
+  private async _fetchAppSchema(): Promise<{ [key: string]: ButtressSchema }> {
     this._logger.debug('_fetchAppSchema', this._settings);
-    if (!this._settings) return;
 
     const coreSchema = this._settings.coreSchema || [];
     const body = await this._client.request<ButtressSchema[]>('GET', `${this._settings.endpoint}/api/v1/app/schema`, {
       query: coreSchema.length > 0 ? { core: coreSchema.join(',') } : {},
     });
-    this._schema = body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
+    this._logger.debug(body);
+    return body.reduce((obj: { [key: string]: ButtressSchema }, schema: ButtressSchema) => {
       obj[schema.core ? coreSchemaLocalName(schema.name) : schema.name] = schema;
       return obj;
     }, {});
-    this._logger.debug(body);
   }
 
-  private async _refreshLocalDataServices() {
-    if (!this._schema || !this._settings) return;
-
-    const schemas: string[] = Object.keys(this._schema || []);
-    const dataServices: string[] = Object.keys(this._dataServices || []);
+  private _refreshLocalDataServices(schemaMap: { [key: string]: ButtressSchema }) {
+    const schemas: string[] = Object.keys(schemaMap);
+    const dataServices: string[] = Object.keys(this._dataServices);
 
     const obsoleteDataServices = dataServices.filter((name) => !schemas.includes(name));
-    // _schema is keyed by local name, which also names the data service.
+    // The schemas are keyed by local name, which also names the data service.
     schemas.forEach((name) => {
-      if (!this._schema) return;
-      const schema = this._schema[name];
+      const schema = schemaMap[name];
       if (dataServices.includes(name)) {
         this._dataServices[name].updateSchema(schema);
       } else {
@@ -345,8 +340,7 @@ export class ButtressDbService extends LitElement {
     this._realtime.setLogLevel(level);
     this._store.setLogLevel(level);
 
-    const dataServices: string[] = Object.keys(this._dataServices || []);
-    dataServices.forEach((key) => this._dataServices[key].setLogLevel(level));
+    Object.values(this._dataServices).forEach((ds) => ds.setLogLevel(level));
   }
 
   create(path: string, value: ButtressEntity, opts: WaitOpts): Promise<string | undefined>;
@@ -418,8 +412,9 @@ export class ButtressDbService extends LitElement {
     return this._write(opts, (o) => this._dsStoreInterface.spliceExt(path, start, deleteCount, o, ...items));
   }
 
-  // Runs a write. With wait, returns a promise of its result that settles with the write's dboComplete. The write
-  // itself still runs straight away, so an invalid call throws rather than rejecting.
+  // Runs a write. With wait, returns a promise of its result that settles with the write's dboComplete, even if the
+  // caller's own dboComplete throws. The write itself still runs straight away, so an invalid call throws rather than
+  // rejecting.
   private _write<T>(opts: WriteOpts | undefined, write: (opts?: NotifyChangeOpts) => T): T | Promise<T> {
     if (!opts?.wait) return write(opts);
 
@@ -432,12 +427,18 @@ export class ButtressDbService extends LitElement {
       ...rest,
       dboComplete: {
         resolve: (value?: unknown) => {
-          rest.dboComplete?.resolve(value);
-          settle.resolve();
+          try {
+            rest.dboComplete?.resolve(value);
+          } finally {
+            settle.resolve();
+          }
         },
         reject: (err?: unknown) => {
-          rest.dboComplete?.reject(err);
-          settle.reject(err);
+          try {
+            rest.dboComplete?.reject(err);
+          } finally {
+            settle.reject(err);
+          }
         },
       },
     });
@@ -546,6 +547,7 @@ export class ButtressDbService extends LitElement {
     if (changedProperties.has('apiPath')) this._settings.apiPath = this.apiPath;
     if (changedProperties.has('userId')) this._settings.userId = this.userId;
     if (changedProperties.has('coreSchema')) this._settings.coreSchema = this.coreSchema;
+    if (changedProperties.has('requestTimeout')) this._settings.requestTimeout = this.requestTimeout;
     // Trigger reconnection?
   }
 

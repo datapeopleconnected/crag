@@ -25,6 +25,10 @@ The package includes a [Custom Elements Manifest](https://custom-elements-manife
 
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
+crag needs a Buttress built from its `develop` branch at `3f044191` or later, published as
+`dpcltd/buttress:sha-3f04419`. It relies on Buttress answering a bulk update for each update in it, and on
+`auth.token` for the realtime socket. No tagged Buttress release has these yet.
+
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
 Node 24 or newer; see [Development](#development).
 
@@ -83,7 +87,9 @@ customElements.define('organisation-list', OrganisationList);
 - Entities you query, fetch or create are kept in a local store, addressed by path: `organisation` (a `Map` of every
   loaded organisation), `organisation.<id>`, `organisation.<id>.name`.
 - Writes change the store straight away, then queue a request to Buttress. Each schema sends its requests one at a
-  time, and additions and updates are combined into bulk requests of up to 100.
+  time, and additions and updates are combined into bulk requests of up to 100. Each write in one still succeeds or
+  fails on its own: Buttress answers a bulk update for each update in it, and a bulk add it refuses, because one of the
+  entities is invalid, is sent again one create at a time.
 - Changes made by other clients arrive over the realtime socket and are applied to the store. Each
   `<buttress-db-service>` has its own session id, so crag ignores realtime messages about its own changes.
 - `subscribe()` calls you back when paths in the store change.
@@ -122,6 +128,7 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `api-path`    | `apiPath`    | Your app's API path on the server. Required.                                                                                                                |
 | `userid`      | `userId`     | Id of the signed-in user, returned by `getUserId()`. crag doesn't use it itself. |
 | `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names are singular: `users` becomes `user`, and `activities` becomes `activity`. |
+| `request-timeout` | `requestTimeout` | How long a request to Buttress may take, in milliseconds, before it fails. Defaults to 60000 (a minute); `0` means no limit. A request that times out is rejected like one that fails on the network, and the requests queued behind it are then sent. |
 | `loglevel`    | `logLevel`   | `error`, `warn`, `info` (the default), `debug` or `sys`. Applies to the element, the store, the data services and the realtime connection.                  |
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
 | `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |
@@ -150,7 +157,7 @@ any time.
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `get(path)`                          | Reads from the local store. Returns `undefined` for anything that isn't loaded.                        |
 | `query(schema, query, opts?)`        | Loads matching entities into the store and resolves to `{ total, results, skip, limit }`. See [Queries](#queries). |
-| `getById(schema, id)`                | Resolves to the entity, from the store if it's loaded and from Buttress if not.                        |
+| `getById(schema, id)`                | Resolves to the entity, from the store if it's loaded and from Buttress if not, or to `undefined` if it was deleted while being fetched. |
 | `count(schema, query, actualCount?)` | Resolves to the number of matching entities, as counted by Buttress.                                    |
 | `getSchema(name)`                    | The schema definition, or `false` if there's no such schema.                                            |
 
@@ -158,9 +165,9 @@ any time.
 
 | Method                                        | Description                                                                                                                                         |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. |
+| `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. A date whose default is `'now'` gets the current time; one crag can't read, such as `'today'`, is left out for Buttress to fill in. |
 | `create(schema, entity, opts?)`               | Adds the entity to the store and to Buttress, generating an `id` if it has none. Returns its path, e.g. `organisation.6709476b082b32233234259c`. |
-| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
+| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store. Otherwise crag sends each value that differs from what Buttress has, by its full path (`address.city`). Arrays are sent whole, and a property the new value leaves out, or sets to `undefined`, is set to `null`. The entity's `id` must match the path's, and is filled in if it's missing. |
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
 | `pushWith(path, opts, ...items)`              | `push` with options. The options come before the items, since an item can be an object too.                                                        |
@@ -170,7 +177,12 @@ any time.
 
 Before you write:
 
+- `get()`, `query()` results and `getById()` give you the store's own objects, not copies. You can change one in
+  place and then `set()` it, or a copy of it: crag compares it with what Buttress has, so it sends the changes and tells
+  subscribers. A change made in place and never `set()` isn't sent, and subscribers don't hear of it.
 - `set`, `push` and `splice` only work inside entities that are already in the store: queried, fetched or created.
+  Inside one, `set` creates any object missing on the way to its path, as Buttress does, and throws if one on the
+  way is `null` or isn't an object.
 - Buttress can append to an array and remove from it, but not insert into the middle. So `push`, and a `splice` that
   only adds at the end, send each added item; a `splice` that only removes sends each removal; and any other `splice`
   sends the whole new array, which overwrites any change someone else makes to that array at the same time.
@@ -224,7 +236,8 @@ db.unsubscribe(id);
 ```
 
 Callbacks run in a microtask, after the store has changed. Entities loaded by `query()` and `getById()` are added to
-the store without notifying subscribers, so use the values those methods return.
+the store without notifying subscribers, so use the values those methods return. A write made while a query or
+`getById()` is waiting for Buttress keeps its value: the response, which is older, doesn't overwrite it.
 
 ### Settings
 
@@ -251,7 +264,8 @@ use them. Each one rejects with a [`ButtressError`](#errors) if Buttress respond
 When Buttress responds with an error status, crag rejects with a `ButtressError`. That covers `connect()`,
 `awaitConnection()`, queries, `getById()`, `count()` and the app administration methods. Writes report it through
 `dboComplete.reject`. A request that gets no response at all, for example because the network is down, rejects with
-the browser's own error instead.
+the browser's own error instead. So does one that takes longer than `request-timeout`: fetch rejects it with a
+`DOMException` named `TimeoutError`.
 
 ```ts
 import { ButtressError } from '@buttress/crag';
@@ -329,7 +343,7 @@ passes through arrays can give several values, and an entity matches if any of t
 | `$in`                                        | is in the operand array                                                     |
 | `$nin`                                       | is not in the operand array. Every value must pass this one.               |
 | `$rex`, `$rexi`                              | matches the regular expression. `$rexi` ignores case.                      |
-| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. `null` never matches. |
+| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. Dates are compared as times, whether they're `Date`s or the ISO strings they arrive from Buttress as. A missing or `null` date never matches, and nor does anything for a `null` operand. |
 | `$exists`                                    | is present, even if `null`, when the operand is `true`; is missing when it's `false`. |
 | `$elMatch`                                   | is an array with an element that matches the sub-query                     |
 | `$inProp`                                    | contains the operand. Top-level properties only.                           |
@@ -342,9 +356,9 @@ Both events bubble and cross shadow roots.
 
 | Event                    | `detail`             | Fired                                                                                                                                  |
 | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`).        |
+| `bjs-connection-changed` | `boolean`            | With `true` when `connect()` opens the realtime socket, then whenever the socket connects (`true`) or disconnects (`false`), and with `false` when it can't connect. socket.io keeps trying after a network failure. It stops if Buttress refuses the connection, for a token it doesn't know or one for another app's api path, or closes it, as it does when the token is deleted. crag then logs it and closes the socket. |
 | `dataservice:loadById`   | `{ schemaName, id }` | When a realtime update arrives for an entity that isn't in the store. crag fetches the entity itself; the event is for information. |
-| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
+| `bjs-resync`             | none                 | When the realtime socket connects again after losing its connection, or after the element was moved in the DOM, and when it first connects after anything was queried, even a query still waiting for its answer. Updates sent in the meantime are lost, so crag has cleared its cached queries: query again to reload what you're showing. |
 
 ```ts
 db.addEventListener('bjs-connection-changed', (e) => {
@@ -398,11 +412,12 @@ npm run test:unit
 | `npm run analyze`             | Writes `custom-elements.json` from `src/`. See `custom-elements-manifest.config.mjs`. |
 | `npm run test:unit`           | Runs the unit tests in Chrome. No build or server needed.                      |
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
+| `npm run test:scripts`        | Tests the scripts in `scripts/` in Node, with a fake `docker`. No Docker needed. |
 | `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
 | `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
 | `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
 | `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
-| `npm run check`               | Runs `lint`, `format`, `typecheck` and `test:unit`.                            |
+| `npm run check`               | Runs `lint`, `format`, `typecheck`, `test:coverage` and `test:scripts`.        |
 | `npm run publint`             | Checks the packed package with publint and Are the Types Wrong.                |
 
 ### End-to-end tests
@@ -415,11 +430,13 @@ npm test
 
 After building, `scripts/e2e.js` starts Buttress, MongoDB and Redis in containers, and seeds Buttress with a test app,
 policies, users and organisations (`scripts/e2e-seed.js`). It then runs the tests in Chrome and removes the containers.
-Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first.
+Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first. Each run has
+containers of its own, so runs side by side, from two worktrees say, don't get in each other's way, and a run removes
+the containers of any earlier run that was killed before it could.
 
-The first run downloads the images. Later runs check for a newer `dpcltd/buttress:develop` and fall back to the copy
-you have when Docker Hub can't be reached. To test against a different image, such as one built from a Buttress
-checkout, set `BUTTRESS_IMAGE`:
+The first run downloads the images. The Buttress image is pinned in `.docker/docker-compose.e2e.yml` to a `develop`
+build, so a run doesn't change as Buttress moves on; move it on deliberately. To test against a different image, such
+as one built from a Buttress checkout, set `BUTTRESS_IMAGE`:
 
 ```bash
 docker build -t buttress:local path/to/buttress-js

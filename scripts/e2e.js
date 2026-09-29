@@ -21,15 +21,19 @@
 // Starts the Docker stack in .docker/docker-compose.e2e.yml, seeds it, runs the command with the endpoint and
 // tokens in BUTTRESS_E2E_* environment variables, then removes the stack. Set BUTTRESS_IMAGE to use another
 // Buttress image, such as one built from a local checkout.
+//
+// Each run's stack is a Compose project of its own, named after the run's process, so runs side by side, from two
+// worktrees say, don't take each other's stacks down.
 
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { seed } from './e2e-seed.js';
 
-const COMPOSE = ['compose', '--file', '.docker/docker-compose.e2e.yml'];
+const PROJECT = `crag-e2e-${process.pid}`;
+const COMPOSE = ['compose', '--file', '.docker/docker-compose.e2e.yml', '--project-name', PROJECT];
 // Nothing in the stack is worth stopping gracefully, and Buttress ignores SIGTERM, which costs ten seconds.
-const DOWN = ['down', '--volumes', '--timeout', '0'];
+const DOWN = ['down', '--volumes', '--timeout', '0', '--remove-orphans'];
 
 // Resolves with the command's exit code. Its output goes straight to the terminal.
 const run = (command, args, options) =>
@@ -49,6 +53,27 @@ const composeOutput = async (...args) => {
   return stdout.trim();
 };
 
+// Whether a process is still running. One that belongs to another user can't be signalled, but is running.
+const isRunning = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+};
+
+// The stacks of earlier runs that were killed before they could remove them: those whose process has ended.
+const abandonedStacks = async () => {
+  const { stdout } = await promisify(execFile)('docker', ['compose', 'ls', '--all', '--format', 'json']);
+  return JSON.parse(stdout || '[]')
+    .map(({ Name }) => Name)
+    .filter((name) => {
+      const pid = Number(/^crag-e2e-(\d+)$/.exec(name)?.[1]);
+      return pid > 0 && !isRunning(pid);
+    });
+};
+
 const [command, ...args] = process.argv.slice(2);
 if (!command) {
   console.error('Usage: node scripts/e2e.js <command> [args...]');
@@ -63,10 +88,11 @@ process.on('SIGINT', () => {
 
 let exitCode = 1;
 try {
-  // Clear out anything left by an earlier run that was killed before it could clean up.
-  await compose(...DOWN, '--remove-orphans');
-  // develop moves on, so fetch the latest. If that fails, say when offline, the cached image is used.
-  if (!process.env.BUTTRESS_IMAGE) await compose('pull', '--ignore-pull-failures', 'buttress');
+  // Clear out what earlier runs left when they were killed before they could clean up.
+  for (const name of await abandonedStacks()) {
+    await run('docker', ['compose', '--project-name', name, ...DOWN]);
+  }
+  // Downloads any image that isn't here yet. The Buttress image is pinned, so there's never a newer one to fetch.
   await compose('up', '--detach', '--wait');
 
   const endpoint = `http://${await composeOutput('port', 'proxy', '80')}`;

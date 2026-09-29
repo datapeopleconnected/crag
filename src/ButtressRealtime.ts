@@ -14,7 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { io } from 'socket.io-client';
+import { io, type Socket } from 'socket.io-client';
 
 import { Logger, LogLevel } from './Logger.js';
 
@@ -38,9 +38,13 @@ export default class ButtressDataRealtime {
 
   private _dispatchCustomEvent: (type: string, init: CustomEventInit) => void;
 
-  private _loadById: (detail: EventDataDataServiceLoadById) => void;
+  // May return a promise, which nothing waits for: a failure is logged.
+  private _loadById: (detail: EventDataDataServiceLoadById) => unknown;
 
   private _isConnected: boolean = false;
+
+  // What bjs-connection-changed last said.
+  private _reported?: boolean;
 
   // Survives replacing the socket: updates sent while this instance had no connection are lost either way.
   private _hasConnected: boolean = false;
@@ -51,7 +55,7 @@ export default class ButtressDataRealtime {
     store: customButtressStoreInterface,
     settings: Settings,
     dispatchCustomEvent: (type: string, init: CustomEventInit) => void,
-    loadById: (detail: EventDataDataServiceLoadById) => void,
+    loadById: (detail: EventDataDataServiceLoadById) => unknown,
   ) {
     this._store = store;
     this._settings = settings;
@@ -79,20 +83,21 @@ export default class ButtressDataRealtime {
 
     this._logger.debug(`Opening connection to ${uri}`);
 
-    this._dispatchCustomEvent('bjs-connection-changed', {
-      detail: true,
-      bubbles: true,
-      composed: true,
-    });
+    this._report(true);
 
     try {
-      this._socket = io(uri, {
-        query: {
+      // A connection of its own: socket.io otherwise shares one between every socket on the endpoint, with the options
+      // of the first, so a second api path would join with the first's token, and closing either closed both.
+      const socket: Socket = io(uri, {
+        auth: {
           token: this._settings.token,
         },
+        forceNew: true,
       });
-      this._socket.on('connect', () => this._onConnected());
-      this._socket.on('disconnect', () => this._onDisconnected());
+      this._socket = socket;
+      socket.on('connect', () => this._onConnected());
+      socket.on('disconnect', (reason: string) => this._onDisconnected(socket, reason));
+      socket.on('connect_error', (err: Error) => this._onConnectError(socket, err));
       this._configureRxEvents();
     } catch (err) {
       this._onDisconnected();
@@ -115,6 +120,11 @@ export default class ButtressDataRealtime {
   set _connected(state: boolean) {
     this._isConnected = state;
     this._logger.debug(state ? `Connected` : `Disconnected`);
+    this._report(state);
+  }
+
+  private _report(state: boolean) {
+    this._reported = state;
     this._dispatchCustomEvent('bjs-connection-changed', {
       detail: state,
       bubbles: true,
@@ -124,7 +134,9 @@ export default class ButtressDataRealtime {
 
   private _onConnected() {
     this._connected = true;
-    if (this._hasConnected) this._resync();
+    // Buttress sends no update for a change made before the socket joined, so anything queried before then may be stale,
+    // even a query still out, which Buttress may have answered from before then.
+    if (this._hasConnected || this._store.hasQueried()) this._resync();
     this._hasConnected = true;
   }
 
@@ -139,8 +151,30 @@ export default class ButtressDataRealtime {
     });
   }
 
-  private _onDisconnected() {
+  // socket.io reconnects after losing the connection, but not after the server closes it, as Buttress does for a token
+  // that has been deleted, so that socket is dropped.
+  private _onDisconnected(socket?: Socket, reason?: string) {
     this._connected = false;
+    if (!socket || socket.active) return;
+
+    if (reason === 'io server disconnect') this._logger.warn(`Buttress closed the realtime connection`);
+    this._drop(socket);
+  }
+
+  // socket.io tries again after a connection fails, as when Buttress can't be reached, but not after Buttress refuses
+  // it, as it does for a token it doesn't know or one used on another app's api path.
+  private _onConnectError(socket: Socket, err: Error) {
+    if (!socket.active) {
+      this._logger.error(`Buttress refused the realtime connection: ${err.message}`);
+      this._drop(socket);
+    } else if (this._reported !== false) {
+      this._logger.warn(`Unable to open the realtime connection, trying again: ${err.message}`);
+    }
+    if (this._reported !== false) this._connected = false;
+  }
+
+  private _drop(socket: Socket) {
+    if (this._socket === socket) this._socket = null;
   }
 
   setLogLevel(level: LogLevel) {
@@ -223,13 +257,22 @@ export default class ButtressDataRealtime {
     this._logger.debug(`_handlePut: start`);
     const responses: Array<any> = Array.isArray(response) ? response : [response];
 
+    // Each result is applied on its own, so one that fails doesn't stop the rest.
+    const apply = (id: string, res: unknown) => {
+      try {
+        this._update(schemaName, pathParts, id, res);
+      } catch (err) {
+        this._logger.error(`Unable to apply an update to ${schemaName} ${id}:`, err);
+      }
+    };
+
     for (let x = 0; x < responses.length; x += 1) {
       const isBulk = responses[x].id && responses[x].results;
 
       if (isBulk) {
-        responses[x].results.forEach((res: any) => this._update(schemaName, pathParts, responses[x].id, res));
+        responses[x].results.forEach((res: any) => apply(responses[x].id, res));
       } else {
-        this._update(schemaName, pathParts, pathParts.id, responses[x]);
+        apply(pathParts.id, responses[x]);
       }
     }
   }
@@ -277,13 +320,10 @@ export default class ButtressDataRealtime {
     for (let x = 0; x < responses.length; x += 1) {
       const existing = this._store.get(`${schemaName}.${responses[x].id}`);
       if (existing) {
-        this._store.set(
-          `${schemaName}.${responses[x].id}`,
-          { ...existing, ...responses[x] },
-          {
-            localOnly: true,
-          },
-        );
+        // Merged in place, so anything holding the entity sees the update.
+        this._store.set(`${schemaName}.${responses[x].id}`, Object.assign(existing, responses[x]), {
+          localOnly: true,
+        });
         continue;
       }
       // Through create() so the data service knows its cached pages may be missing it.
@@ -293,7 +333,7 @@ export default class ButtressDataRealtime {
     }
   }
 
-  private async _update(schemaName: string, pathParts: PathParts, id: string, response: any) {
+  private _update(schemaName: string, pathParts: PathParts, id: string, response: any) {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (updatePath === false) {
@@ -303,7 +343,9 @@ export default class ButtressDataRealtime {
         bubbles: true,
         composed: true,
       });
-      this._loadById(detail);
+      Promise.resolve(this._loadById(detail)).catch((err) =>
+        this._logger.error(`Unable to load ${schemaName} ${id} after an update to it:`, err),
+      );
       return;
     }
 

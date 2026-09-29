@@ -61,6 +61,20 @@ export const seed = async (endpoint, superToken) => {
         __default: null,
         __required: true,
         __allowUpdate: true
+      },
+      // Typed arrays, which Buttress checks item by item.
+      tags: {
+        __type: 'array',
+        __itemtype: 'string',
+        __allowUpdate: true
+      },
+      contacts: {
+        __type: 'array',
+        __allowUpdate: true,
+        __schema: {
+          name: { __type: 'string', __default: null, __allowUpdate: true },
+          qty: { __type: 'number', __default: 0, __allowUpdate: true }
+        }
       }
     }
   }];

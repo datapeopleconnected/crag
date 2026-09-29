@@ -14,7 +14,7 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { expect, fixture } from '@open-wc/testing';
+import { expect, fixture, waitUntil } from '@open-wc/testing';
 import { html, LitElement } from 'lit';
 import { consume } from '@lit/context';
 
@@ -121,6 +121,7 @@ describe('ButtressDbService settings', () => {
     el.token = 'abc';
     el.userId = 'user-1';
     el.coreSchema = ['app'];
+    el.requestTimeout = 5000;
 
     // updateComplete resolves false if another update was requested during this one.
     expect(await el.updateComplete).to.equal(true);
@@ -128,6 +129,15 @@ describe('ButtressDbService settings', () => {
     expect(el.getToken()).to.equal('abc');
     expect(el.getUserId()).to.equal('user-1');
     expect(el.getCoreSchemas()).to.deep.equal(['app']);
+    expect((el as any)._settings.requestTimeout).to.equal(5000);
+  });
+
+  it('reads the request timeout, in milliseconds, from request-timeout', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service request-timeout="5000"></buttress-db-service>
+    `);
+
+    expect((el as any)._settings.requestTimeout).to.equal(5000);
   });
 });
 
@@ -303,6 +313,112 @@ describe('ButtressDbService resync', () => {
     (el as any)._dsStoreInterface.clearQueryMaps();
 
     expect(cleared).to.deep.equal(['organisation', 'person']);
+  });
+
+  // So realtime resyncs when it first connects after anything was queried, even a query still out: Buttress ran it
+  // before the socket joined, and sends no update for a change made in between.
+  describe('whether anything has been queried', () => {
+    let originalFetch: typeof window.fetch;
+    let hold: Promise<void> | undefined;
+    let searches: number;
+
+    beforeEach(() => {
+      originalFetch = window.fetch;
+      hold = undefined;
+      searches = 0;
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const { pathname } = new URL(input.toString());
+        if (pathname.endsWith('/app/schema')) {
+          return new Response(JSON.stringify([{ name: 'organisation', type: 'collection', properties: {} }]));
+        }
+        if (pathname.endsWith('/count')) return new Response('0');
+        await hold;
+        if (init?.method === 'SEARCH') searches += 1;
+        return new Response(init?.method === 'GET' ? '{"id":"x"}' : '[]');
+      };
+    });
+
+    afterEach(() => {
+      window.fetch = originalFetch;
+    });
+
+    const connected = async () => {
+      const el = await fixture<ButtressDbService>(html`
+        <buttress-db-service endpoint="https://example.test" token="abc" api-path="app"></buttress-db-service>
+      `);
+      (el as any)._realtime.connect = () => {};
+      await el.connect();
+      return el;
+    };
+    const hasQueried = (el: ButtressDbService) => (el as any)._dsStoreInterface.hasQueried();
+    // Holds the requests after it, until the function it returns is called.
+    const holdRequests = () => {
+      let release!: () => void;
+      hold = new Promise((resolve) => {
+        release = resolve;
+      });
+      return release;
+    };
+
+    it('is false before anything is queried', async () => {
+      expect(hasQueried(await connected())).to.equal(false);
+    });
+
+    it('is true after a query, even one that found nothing', async () => {
+      const el = await connected();
+
+      await el.query('organisation', {});
+
+      expect(hasQueried(el)).to.equal(true);
+    });
+
+    it('is true with an entity in the store', async () => {
+      const el = await connected();
+
+      el.create('organisation', { id: 'x' }, { localOnly: true });
+
+      expect(hasQueried(el)).to.equal(true);
+    });
+
+    it('is true while a query is still out', async () => {
+      const el = await connected();
+      const release = holdRequests();
+
+      const loading = el.query('organisation', {});
+
+      expect(hasQueried(el)).to.equal(true);
+      release();
+      await loading;
+    });
+
+    it('is true while a getById is still out', async () => {
+      const el = await connected();
+      const release = holdRequests();
+
+      const loading = el.getById('organisation', 'x');
+
+      expect(hasQueried(el)).to.equal(true);
+      release();
+      await loading;
+    });
+
+    it('resyncs when the socket first connects while the first query is still out', async () => {
+      const el = await connected();
+      let resyncs = 0;
+      el.addEventListener('bjs-resync', () => {
+        resyncs += 1;
+      });
+      const release = holdRequests();
+
+      const loading = el.query('organisation', {});
+      (el as any)._realtime._onConnected();
+      release();
+      await loading;
+      await el.query('organisation', {});
+
+      expect(resyncs).to.equal(1);
+      expect(searches).to.equal(2);
+    });
   });
 });
 
@@ -509,10 +625,15 @@ describe('ButtressDbService wait', () => {
     status = 200;
     holdWrites = undefined;
     writes = 0;
-    window.fetch = async (input: RequestInfo | URL) => {
-      if (new URL(input.toString()).pathname.endsWith('/app/schema')) return new Response(JSON.stringify(schemas));
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { pathname } = new URL(input.toString());
+      if (pathname.endsWith('/app/schema')) return new Response(JSON.stringify(schemas));
       writes += 1;
       await holdWrites;
+      // As Buttress does, a bulk update is answered for each update in it.
+      if (status === 200 && pathname.endsWith('/bulk/update')) {
+        return new Response(JSON.stringify(JSON.parse(init!.body as string).map(() => ({ results: [] }))));
+      }
       return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
     };
   });
@@ -632,5 +753,695 @@ describe('ButtressDbService wait', () => {
     });
 
     expect(called).to.equal(true);
+  });
+
+  // The callback's error isn't swallowed: it reaches the page as an unhandled rejection, recorded here. The test runner
+  // reports those with console.error, as the queue reports a rejected write, so that's silenced meanwhile.
+  describe('with a dboComplete callback that throws', () => {
+    let uncaught: unknown[];
+    let originalError: typeof console.error;
+    const onRejection = (event: PromiseRejectionEvent) => {
+      uncaught.push(event.reason);
+    };
+    const throwing = () => {
+      throw new Error('callback failed');
+    };
+    const uncaughtMessages = async () => {
+      await waitUntil(() => uncaught.length > 0, 'no unhandled rejection');
+      return uncaught.map((err) => (err as Error).message);
+    };
+
+    beforeEach(() => {
+      uncaught = [];
+      window.addEventListener('unhandledrejection', onRejection);
+      originalError = console.error;
+      console.error = () => {};
+    });
+
+    afterEach(() => {
+      window.removeEventListener('unhandledrejection', onRejection);
+      console.error = originalError;
+    });
+
+    it('still resolves with wait once Buttress accepts the write', async () => {
+      const el = await connected();
+
+      const setting = el.set('organisation.x.name', 'b', {
+        wait: true,
+        dboComplete: { resolve: throwing, reject: () => {} },
+      });
+
+      expect(await outcomeOf(setting)).to.equal('resolved');
+      expect(await uncaughtMessages()).to.deep.equal(['callback failed']);
+    });
+
+    it('still rejects with wait when Buttress rejects the write', async () => {
+      const el = await connected();
+      status = 400;
+
+      const setting = el.set('organisation.x.name', 'b', {
+        wait: true,
+        dboComplete: { resolve: () => {}, reject: throwing },
+      });
+
+      expect(await outcomeOf(setting)).to.equal('rejected');
+      expect(await uncaughtMessages()).to.deep.equal(['callback failed']);
+    });
+  });
+
+  it('still calls dboComplete.reject with wait when Buttress rejects the write', async () => {
+    const el = await connected();
+    const originalError = console.error;
+    console.error = () => {};
+    status = 400;
+    let rejected: unknown;
+
+    await el
+      .set('organisation.x.name', 'b', {
+        wait: true,
+        dboComplete: {
+          resolve: () => {},
+          reject: (err) => {
+            rejected = err;
+          },
+        },
+      })
+      .catch(() => {});
+    console.error = originalError;
+
+    expect(rejected).to.be.instanceOf(ButtressError);
+  });
+});
+
+// Writes waiting at the same time go to Buttress as one bulk request, which it answers for each write.
+describe('ButtressDbService bundled writes', () => {
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+  let release: () => void;
+  let writes: number;
+
+  const schemas = [
+    {
+      name: 'organisation',
+      type: 'collection',
+      properties: { name: { __type: 'string' }, status: { __type: 'string' } },
+    },
+  ];
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    // The queue logs each refused write.
+    console.error = () => {};
+    writes = 0;
+    // Pretends to be Buttress: refuses a status of 'invalid', and a create without a name.
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const route = new URL(input.toString()).pathname.replace(/^(\/app)?\/api\/v1\//, '');
+      if (route === 'app/schema') return json(schemas);
+      writes += 1;
+      // Holds the first write, so the ones after it wait and are bundled.
+      if (writes === 1) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      const body = JSON.parse(init!.body as string);
+      if (route === 'organisation/bulk/update') {
+        return json(
+          body.map((u: { id: string; body: { value: unknown } }) =>
+            u.body.value === 'invalid'
+              ? { id: u.id, results: null, validation: { code: 400, message: 'organisation: Invalid value: status' } }
+              : { id: u.id, results: [u.body] },
+          ),
+        );
+      }
+      if (route === 'organisation/bulk/add') {
+        const invalid = body.findIndex((entity: { name: string }) => !entity.name);
+        if (invalid !== -1) return json({ message: `organisation: Missing field: name at index ${invalid}` }, 400);
+      }
+      if (route === 'organisation/' && !body.name) return json({ message: 'organisation: Missing field: name' }, 400);
+      return json(body);
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  const connected = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    el.create('organisation', { id: 'x', name: 'a', status: 'new' }, { localOnly: true });
+    el.create('organisation', { id: 'y', name: 'b', status: 'new' }, { localOnly: true });
+    return el;
+  };
+  const outcome = (write: Promise<unknown>) =>
+    write.then(
+      () => 'resolved',
+      (err: ButtressError) => `${err.status} ${err.serverMessage}`,
+    );
+
+  it('rejects, with wait, only the update in a bundle that Buttress refused', async () => {
+    const el = await connected();
+
+    const outcomes = [
+      el.set('organisation.x.name', 'first', { wait: true }),
+      el.set('organisation.x.status', 'invalid', { wait: true }),
+      el.set('organisation.y.name', 'c', { wait: true }),
+    ].map(outcome);
+    release();
+
+    expect(await Promise.all(outcomes)).to.deep.equal([
+      'resolved',
+      '400 organisation: Invalid value: status',
+      'resolved',
+    ]);
+  });
+
+  it('saves, with wait, the valid creates in a bulk add that Buttress refused, and rejects the invalid one', async () => {
+    const el = await connected();
+
+    const outcomes = [
+      el.set('organisation.x.name', 'first', { wait: true }),
+      el.create('organisation', { id: 'a1', name: 'A' }, { wait: true }),
+      el.create('organisation', { id: 'b1', name: '' }, { wait: true }),
+      el.create('organisation', { id: 'c1', name: 'C' }, { wait: true }),
+    ].map(outcome);
+    release();
+
+    expect(await Promise.all(outcomes)).to.deep.equal([
+      'resolved',
+      'resolved',
+      '400 organisation: Missing field: name',
+      'resolved',
+    ]);
+  });
+});
+
+// get(), query results and getById() hand out the store's own objects, which an app can change in place. So a set works
+// out what to send from what Buttress has, not from the object in the store.
+describe('ButtressDbService set of an entity from the store', () => {
+  type Sent = { method: string; path: string; body: unknown };
+  type BulkUpdate = { id: string; body: unknown }[];
+
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+  let sent: Sent[];
+  let status: number;
+
+  const schemas = [
+    {
+      name: 'organisation',
+      type: 'collection',
+      properties: {
+        name: { __type: 'string' },
+        status: { __type: 'string' },
+        tags: { __type: 'array' },
+        address: { city: { __type: 'string' }, street: { __type: 'string' } },
+      },
+    },
+  ];
+  const stored = { id: 'x', name: 'a', status: 'new', tags: ['a', 'b'], address: { city: 'Leeds', street: 'High St' } };
+  const path = 'organisation.x';
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    sent = [];
+    status = 200;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const route = new URL(input.toString()).pathname.replace('/api/v1/', '');
+      if (route === 'app/schema') return new Response(JSON.stringify(schemas));
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({ method: init!.method!, path: route, body });
+      if (route.endsWith('/count')) return new Response('1');
+      if (init?.method === 'SEARCH') return new Response(JSON.stringify([stored]));
+      if (route.endsWith('/bulk/update')) {
+        return new Response(JSON.stringify((body as BulkUpdate).map((u) => ({ id: u.id, results: [u.body] }))));
+      }
+      return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  // A connected element with organisation x loaded by a query.
+  const loaded = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    const { results } = await el.query('organisation', {});
+    sent = [];
+    return { el, entity: results[0] };
+  };
+
+  // The { path, value } of each update sent, bundled or not.
+  const updates = () =>
+    sent.flatMap((r) => {
+      if (r.method === 'PUT') return [r.body];
+      if (r.path.endsWith('/bulk/update')) return (r.body as BulkUpdate).map((u) => u.body);
+      return [];
+    });
+
+  it('sends a nested edit made to a copy of the entity', async () => {
+    const { el } = await loaded();
+
+    const copy = { ...el.get(path)! };
+    copy.address.city = 'York';
+    await el.set(path, copy, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'address.city', value: 'York' }]);
+  });
+
+  it('sends an edit made to the entity in place, and notifies subscribers', async () => {
+    const { el, entity } = await loaded();
+    const names: unknown[] = [];
+    el.subscribe(`${path}.name`, (cr: { value: unknown }) => names.push(cr.value));
+
+    entity.name = 'b';
+    await el.set(path, entity, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'name', value: 'b' }]);
+    expect(names).to.deep.equal(['b']);
+  });
+
+  it('sends an edit made to an array in place, and notifies subscribers', async () => {
+    const { el, entity } = await loaded();
+    const lengths: unknown[] = [];
+    el.subscribe(`${path}.tags`, (cr: { value: unknown[] }) => lengths.push(cr.value.length));
+
+    entity.tags.push('c');
+    await el.set(`${path}.tags`, entity.tags, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'tags', value: ['a', 'b', 'c'] }]);
+    expect(lengths).to.deep.equal([3]);
+  });
+
+  it('sets the properties a whole-entity set leaves out to null', async () => {
+    const { el } = await loaded();
+
+    await el.set(path, { id: 'x', name: 'b', tags: ['a', 'b'] }, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'name', value: 'b' },
+      { path: 'status', value: null },
+      { path: 'address', value: null },
+    ]);
+  });
+
+  it('sets the properties a nested object set leaves out to null', async () => {
+    const { el } = await loaded();
+
+    await el.set(`${path}.address`, { city: 'York' }, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'address.city', value: 'York' },
+      { path: 'address.street', value: null },
+    ]);
+  });
+
+  it('sets a property set to undefined to null', async () => {
+    const { el, entity } = await loaded();
+
+    await el.set(path, { ...entity, status: undefined }, { wait: true });
+    await el.set(`${path}.name`, undefined, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'status', value: null },
+      { path: 'name', value: null },
+    ]);
+  });
+
+  it('does not send again what a realtime update brought', async () => {
+    const { el } = await loaded();
+    (el as any)._realtime._parsePayload({
+      schemaName: 'organisation',
+      verb: 'put',
+      path: 'organisation/x',
+      pathSpec: 'organisation/:id',
+      response: { type: 'scalar', path: 'name', value: 'from elsewhere' },
+    });
+
+    await el.set(path, { ...el.get(path)!, status: 'done' }, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'status', value: 'done' }]);
+  });
+
+  it('sends a value again after Buttress refused it', async () => {
+    const { el } = await loaded();
+    console.error = () => {};
+    status = 400;
+    await el.set(`${path}.name`, 'b', { wait: true }).catch(() => {});
+
+    status = 200;
+    await el.set(`${path}.name`, 'b', { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'name', value: 'b' },
+      { path: 'name', value: 'b' },
+    ]);
+  });
+
+  it('does not send again what it has already sent', async () => {
+    const { el, entity } = await loaded();
+
+    entity.name = 'b';
+    await el.set(path, entity, { wait: true });
+    await el.set(path, entity, { wait: true });
+    await el.set(`${path}.name`, 'b', { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'name', value: 'b' }]);
+  });
+});
+
+describe('ButtressDbService API', () => {
+  let originalFetch: typeof window.fetch;
+  let sent: { method: string; path: string; apiPath: string | null; body: unknown }[];
+  let schemas: object[];
+  let respond: (path: string) => unknown;
+
+  const organisation = {
+    name: 'organisation',
+    type: 'collection',
+    properties: { name: { __type: 'string' }, tags: { __type: 'array' } },
+  };
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    sent = [];
+    schemas = [organisation];
+    respond = () => ({});
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input.toString());
+      const path = url.pathname.replace('/api/v1/', '');
+      if (path === 'app/schema') return new Response(JSON.stringify(schemas));
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({ method: init!.method!, path, apiPath: url.searchParams.get('apiPath'), body });
+      return new Response(JSON.stringify(respond(path)));
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+  });
+
+  const element = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    return el;
+  };
+
+  // A connected element with organisation x in its store.
+  const connected = async () => {
+    const el = await element();
+    await el.connect();
+    el.create('organisation', { id: 'x', name: 'a', tags: ['a', 'b'] }, { localOnly: true });
+    return el;
+  };
+
+  it('reports whether it is connected', async () => {
+    const el = await element();
+
+    expect(el.isDbConnected()).to.equal(false);
+    await el.connect();
+    expect(el.isDbConnected()).to.equal(true);
+  });
+
+  it('resolves awaitConnection straight away once connected', async () => {
+    const el = await connected();
+
+    expect(await el.awaitConnection()).to.equal(true);
+  });
+
+  it('names the missing setting when connect() is missing the token or apiPath', async () => {
+    const noToken = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test"></buttress-db-service>
+    `);
+    const noApiPath = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc"></buttress-db-service>
+    `);
+
+    expect(((await noToken.connect().catch((e: Error) => e)) as Error).message).to.match(/'token'/);
+    expect(((await noApiPath.connect().catch((e: Error) => e)) as Error).message).to.match(/'apiPath'/);
+  });
+
+  it('connects without being in the document, and opens the realtime socket', async () => {
+    const el = document.createElement('buttress-db-service') as ButtressDbService;
+    let realtimeConnects = 0;
+    (el as any)._realtime.connect = () => {
+      realtimeConnects += 1;
+    };
+    el.setEndpoint('https://example.test');
+    el.setToken('abc');
+    await el.setApiPath('app');
+
+    await el.connect();
+
+    expect(el.getSchema('organisation')).to.not.equal(false);
+    expect(realtimeConnects).to.equal(1);
+  });
+
+  it('keeps data services on a second connect, and drops those whose schema has gone', async () => {
+    const el = await connected();
+    const before = (el as any)._dataServices.organisation;
+    schemas = [
+      { ...organisation, properties: { links: { __type: 'array' } } },
+      { ...organisation, name: 'person' },
+    ];
+    await el.connect();
+    expect((el as any)._dataServices.organisation).to.equal(before);
+    expect(el.pushWith('organisation.x.links', { localOnly: true }, 'a')).to.equal(1);
+
+    schemas = [{ ...organisation, name: 'person' }];
+    await el.connect();
+
+    expect(Object.keys((el as any)._dataServices)).to.deep.equal(['person']);
+  });
+
+  it('logs the error when the realtime socket cannot be reopened after a move', async () => {
+    const parent = await fixture<HTMLDivElement>(html`
+      <div>
+        <buttress-db-service log-disable></buttress-db-service>
+        <section></section>
+      </div>
+    `);
+    const el = parent.querySelector<ButtressDbService>('buttress-db-service')!;
+    const realtime = (el as any)._realtime;
+    realtime.disconnect = () => {};
+    Object.defineProperty(realtime, 'isOpen', { get: () => true });
+    realtime.connect = () => {
+      throw new Error('no socket');
+    };
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => logged.push(args);
+
+    parent.querySelector('section')!.appendChild(el);
+    console.error = originalError;
+
+    expect(logged).to.have.length(1);
+  });
+
+  it('finds no local name before the schemas have loaded', async () => {
+    const el = await element();
+
+    expect((el as any)._dsStoreInterface.localName('organisation')).to.equal(undefined);
+  });
+
+  it('returns false from getSchema for a schema it does not have', async () => {
+    const el = await element();
+
+    expect(el.getSchema('organisation')).to.equal(false);
+    await el.connect();
+    expect(el.getSchema(undefined)).to.equal(false);
+    expect(el.getSchema('unknown')).to.equal(false);
+  });
+
+  it('pushes and splices without options', async () => {
+    const el = await connected();
+
+    expect(el.push('organisation.x.tags', 'c')).to.equal(3);
+    expect(el.splice('organisation.x.tags', 0, 1)).to.deep.equal(['a']);
+    await el.nextIdle('organisation');
+
+    expect(el.get('organisation.x.tags')).to.deep.equal(['b', 'c']);
+    expect(sent.map((r) => r.method)).to.deep.equal(['PUT', 'PUT']);
+  });
+
+  it('passes notifyPath through to the data service', async () => {
+    const el = await connected();
+
+    expect((el as any)._dsStoreInterface.notifyPath('organisation.x.name', 'b')).to.equal(true);
+  });
+
+  it('only deletes top-level entities', async () => {
+    const el = await connected();
+
+    expect(() => el.delete('organisation.x.name')).to.throw('Delete is only avaible for top level entities');
+  });
+
+  it('throws for a path with no data service', async () => {
+    const el = await connected();
+
+    expect(() => el.get('unknown.x')).to.throw('Unable to find data service with path part unknown');
+  });
+
+  it('calls subscribers until they unsubscribe', async () => {
+    const el = await connected();
+    const values: unknown[] = [];
+    const id = el.subscribe('organisation.x.name', (cr: { value: unknown }) => values.push(cr.value));
+
+    el.set('organisation.x.name', 'b', { localOnly: true });
+    await el.nextIdle('organisation');
+    expect(el.unsubscribe(id)).to.equal(true);
+    el.set('organisation.x.name', 'c', { localOnly: true });
+    await el.nextIdle('organisation');
+
+    expect(values).to.deep.equal(['b']);
+    expect(el.unsubscribe(id)).to.equal(false);
+  });
+
+  describe('an entity held from a query', () => {
+    const held = async (el: ButtressDbService) => {
+      respond = (path) => (path.endsWith('/count') ? 1 : [{ id: 'x', name: 'a' }]);
+      const { results } = await el.query('organisation', { name: { $eq: 'a' } });
+      return results[0];
+    };
+
+    it('is still the entity in the store after a later search returns it, with the fresh values', async () => {
+      const el = await connected();
+      const entity = await held(el);
+      // Partial, as a projected search returns them, and twice.
+      respond = (path) =>
+        path.endsWith('/count')
+          ? 1
+          : [
+              { id: 'x', name: 'b' },
+              { id: 'x', status: 'new' },
+            ];
+
+      const { results } = await el.query('organisation', {});
+      el.set('organisation.x.name', 'c', { localOnly: true });
+
+      expect(results[0]).to.equal(entity);
+      expect(el.get('organisation.x')).to.equal(entity);
+      expect(entity).to.deep.equal({ id: 'x', name: 'c', tags: ['a', 'b'], status: 'new' });
+    });
+
+    it('is still the entity in the store after a realtime post for it, with the fresh values', async () => {
+      const el = await connected();
+      const entity = await held(el);
+      const notified: unknown[] = [];
+      el.subscribe('organisation.x', (cr: unknown) => notified.push(cr));
+
+      (el as any)._realtime._handlePost('organisation', { id: 'x', name: 'b' });
+      await el.nextIdle('organisation');
+
+      expect(el.get('organisation.x')).to.equal(entity);
+      expect(entity).to.deep.equal({ id: 'x', name: 'b', tags: ['a', 'b'] });
+      expect(notified).to.deep.equal([{ value: entity, opts: { localOnly: true, forceChanged: true } }]);
+    });
+  });
+
+  it('notifies subscribers, and sends the change, for a set of an entity changed in place', async () => {
+    const el = await connected();
+    const entity = el.get('organisation.x')!;
+    const values: unknown[] = [];
+    el.subscribe('organisation.x.name', (cr: { value: unknown }) => values.push(cr.value));
+
+    entity.name = 'b';
+    el.set('organisation.x', entity);
+    await el.nextIdle('organisation');
+
+    expect(values).to.deep.equal(['b']);
+    expect(sent.map(({ method, body }) => ({ method, body }))).to.deep.equal([
+      { method: 'PUT', body: { path: 'name', value: 'b' } },
+    ]);
+  });
+
+  it('creates a blank object from a schema', async () => {
+    const el = await connected();
+
+    expect(el.createObject('organisation')).to.include({ name: '' });
+    expect(() => el.createObject('unknown')).to.throw('Unable to find schema for path unknown');
+  });
+
+  it('gets an entity by id', async () => {
+    const el = await connected();
+    respond = (path) => ({ id: path.split('/').pop(), name: 'y' });
+
+    expect(await el.getById('organisation', 'y')).to.deep.equal({ id: 'y', name: 'y' });
+    expect(((await el.getById('organisation', '').catch((e: Error) => e)) as Error).message).to.equal(
+      'Unable to get property without an id',
+    );
+    expect(await el.getById('unknown', 'y').catch((e: Error) => e)).to.be.instanceOf(Error);
+  });
+
+  it('fetches an entity when realtime asks it to', async () => {
+    const el = await connected();
+    respond = (path) => ({ id: path.split('/').pop(), name: 'y' });
+
+    await (el as any)._realtime._loadById({ schemaName: 'organisation', id: 'y' });
+
+    expect(el.get('organisation.y')).to.deep.equal({ id: 'y', name: 'y' });
+  });
+
+  it('queries and counts through the data service', async () => {
+    const el = await connected();
+    respond = (path) => (path.endsWith('/count') ? 1 : [{ id: 'x', name: 'a' }]);
+
+    expect((await el.query('organisation', { name: { $eq: 'a' } })).total).to.equal(1);
+    expect(await el.count('organisation', {})).to.equal(1);
+    expect(await el.query('unknown', {}).catch((e: Error) => e)).to.be.instanceOf(Error);
+    expect(await el.count('unknown', {}).catch((e: Error) => e)).to.be.instanceOf(Error);
+  });
+
+  it('finds the data service for a path', async () => {
+    const el = await connected();
+
+    expect(el._resolveDataServiceFromPath('organisation.x')?.name).to.equal('organisation');
+    expect(el._resolveDataServiceFromPath('unknown.x')).to.equal(undefined);
+  });
+
+  it('sends each admin request to the API path it is given', async () => {
+    const el = await element();
+    respond = () => ({ remoteAppToken: 'remote' });
+    const lambda = { id: 'l1', git: { branch: 'main', hash: 'abc' } };
+
+    expect(await el.addLambda(lambda, { auth: true }, 'other')).to.equal(true);
+    expect(await el.deployLambda(lambda, 'other')).to.equal(true);
+    expect(await el.addDataSharing({ id: 'ds1' }, 'other')).to.equal('remote');
+    expect(await el.updateAppPolicySelectors('other', { role: 'x' })).to.equal(true);
+    expect(await el.activateDataSharing('ds1', 'other', 'token')).to.equal(true);
+
+    expect(sent).to.deep.equal([
+      { method: 'POST', path: 'lambda', apiPath: 'other', body: { lambda, auth: { auth: true } } },
+      { method: 'PUT', path: 'lambda/l1/deployment', apiPath: 'other', body: { branch: 'main', hash: 'abc' } },
+      { method: 'POST', path: 'app-data-sharing', apiPath: 'other', body: { id: 'ds1' } },
+      { method: 'PUT', path: 'app/policy-property-list', apiPath: 'other', body: { role: 'x' } },
+      { method: 'PUT', path: 'app-data-sharing/ds1/token', apiPath: 'other', body: { token: 'token' } },
+    ]);
+  });
+
+  it('throws from an admin request without an endpoint', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service></buttress-db-service>
+    `);
+
+    expect(((await el.addSchema('other', []).catch((e: Error) => e)) as Error).message).to.equal(
+      "Missing setting 'endpoint' while sending PUT app/schema",
+    );
   });
 });

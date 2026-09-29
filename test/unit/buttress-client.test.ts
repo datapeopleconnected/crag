@@ -110,6 +110,55 @@ describe('ButtressClient', () => {
     expect(err.serverMessage).to.equal('Bad Gateway');
   });
 
+  describe('timeout', () => {
+    // Never responds, and rejects with the signal's reason when aborted, as fetch does.
+    const hang = () => {
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        sent.push({ url: new URL(input.toString()), init: init! });
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        });
+      };
+    };
+
+    const outcomeOf = (promise: Promise<unknown>) =>
+      Promise.race([
+        promise.then(
+          () => 'resolved',
+          (err: Error) => err.name,
+        ),
+        new Promise((resolve) => {
+          setTimeout(() => resolve('pending'), 200);
+        }),
+      ]);
+
+    it('gives up on a request with no response after requestTimeout milliseconds', async () => {
+      const settings = buildSettings({ endpoint: 'https://example.test', token: 'abc', requestTimeout: 20 });
+      hang();
+
+      const outcome = await outcomeOf(new ButtressClient(settings).request('GET', 'https://example.test/x'));
+
+      expect(outcome).to.equal('TimeoutError');
+    });
+
+    it('times out after a minute by default', async () => {
+      const { client: c } = client();
+
+      await c.request('GET', 'https://example.test/api/v1/app/schema');
+
+      expect(sent[0].init.signal).to.be.instanceOf(AbortSignal);
+      expect(sent[0].init.signal!.aborted).to.equal(false);
+    });
+
+    it('never times out with a requestTimeout of 0', async () => {
+      const settings = buildSettings({ endpoint: 'https://example.test', token: 'abc', requestTimeout: 0 });
+
+      await new ButtressClient(settings).request('GET', 'https://example.test/x');
+
+      expect(sent[0].init.signal).to.equal(undefined);
+    });
+  });
+
   it('throws without sending when the token is missing', async () => {
     const settings = buildSettings({ endpoint: 'https://example.test' });
 

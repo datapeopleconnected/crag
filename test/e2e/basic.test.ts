@@ -14,171 +14,287 @@
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { html } from 'lit';
-import { fixture, expect } from '@open-wc/testing';
+import { expect, waitUntil } from '@open-wc/testing';
 
 import { ButtressDbService, ButtressError } from '@buttress/crag';
 import '@buttress/crag/components/buttress-db-service.js';
 
+type Entity = { [key: string]: unknown };
+
+const ENDPOINT = 'BUILD_REPLACE_TESTE2E_WITH_ENDPOINT';
+const APP_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_APP_TOKEN';
+const USER1_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER1_TOKEN';
+const USER2_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER2_TOKEN';
+
+// scripts/e2e-seed.js creates these. Test Org n has number n * 10, and is active when n is even. Buttress fills in
+// the arrays, which the seed leaves out.
+const SEEDED = Array.from({ length: 10 }, (_, n) => ({
+  name: `Test Org ${n}`,
+  number: n * 10,
+  status: n % 2 === 0 ? 'active' : 'inactive',
+  tags: [],
+  contacts: [],
+}));
+const SEEDED_NAMES = SEEDED.map((org) => org.name);
+
+// The properties Buttress let through, in name order, without the ids it adds.
+const visible = (results: Entity[]) =>
+  results.map(({ id, sourceId, ...rest }) => rest).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
 describe('ButtressDbService', () => {
-  let db: ButtressDbService;
-  let entityPath: string | undefined;
+  const elements: ButtressDbService[] = [];
 
-  const TEST_APP_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_APP_TOKEN';
-  const TEST_USER1_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER1_TOKEN';
-  const TEST_USER2_TOKEN = 'BUILD_REPLACE_TESTE2E_WITH_USER2_TOKEN';
+  // A <buttress-db-service> in the document, connected to the seeded app with the token, once its realtime socket
+  // is up. connect() fires bjs-connection-changed with true as it opens the socket, then again when it connects.
+  const connectAs = async (token: string) => {
+    const db = document.createElement('buttress-db-service') as ButtressDbService;
+    db.setAttribute('endpoint', ENDPOINT);
+    db.setAttribute('token', token);
+    db.setAttribute('api-path', 'test');
+    document.body.appendChild(db);
+    elements.push(db);
 
-  console.log('TEST_APP_TOKEN', TEST_APP_TOKEN);
-  console.log('TEST_USER1_TOKEN', TEST_USER1_TOKEN);
-  console.log('TEST_USER2_TOKEN', TEST_USER2_TOKEN);
-
-  it('should be isDbConnected is false by default', async () => {
-    const el: ButtressDbService = await fixture(html`
-      <buttress-db-service></buttress-db-service>
-    `);
-
-    expect(el.isDbConnected()).to.equal(false);
-  });
-
-  it('should connect to a db instance', async () => {
-    db = await fixture(html`
-      <buttress-db-service
-        endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-        token="${TEST_APP_TOKEN}"
-        api-path="test"
-      ></buttress-db-service>
-    `);
-
+    let opened = 0;
+    const socketConnected = new Promise<void>((resolve) => {
+      db.addEventListener('bjs-connection-changed', (e) => {
+        if ((e as CustomEvent<boolean>).detail && ++opened === 2) resolve();
+      });
+    });
     await db.connect();
+    await socketConnected;
+    return db;
+  };
 
-    expect(db.isDbConnected()).to.equal(true);
+  // An organisation Buttress will accept: number and status are required.
+  const newOrg = (db: ButtressDbService, name: string) => ({
+    ...db.createObject('organisation'),
+    name,
+    number: 123,
+    status: 'active',
   });
 
-  it('should query a data schema', async () => {
-    const queryCall = await db.query('organisation', {}); // { total: 0, results: [], skip: undefined, limit: undefined });
-
-    expect(queryCall.total).greaterThan(0);
-    expect(queryCall.results).to.be.an('array');
+  after(() => {
+    elements.forEach((el) => el.remove());
   });
 
-  it('should add some data', async () => {
-    const payload = db.createObject('organisation');
-    payload.name = 'Test Organisation';
-    payload.number = 123;
-    payload.status = 'active';
+  it('is not connected by default', () => {
+    const db = document.createElement('buttress-db-service') as ButtressDbService;
 
-    const res = db.create('organisation', payload); // 'organisation.6709476b082b32233234259c'
-    expect(res).to.be.a('string');
-    expect(res).to.match(/organisation\.[a-f0-9]{24}/);
-
-    entityPath = res;
+    expect(db.isDbConnected()).to.equal(false);
   });
 
-  it('should update some data', async () => {
-    db.set(`${entityPath}.name`, 'Test Orgs 2');
-
-    // Check to see if the data has been updated
-    const value = db.get(`${entityPath}.name`);
-    expect(value).to.equal('Test Orgs 2');
-  });
-
-  it('should remove some data', async () => {
-    if (entityPath === undefined) throw new Error('entityPath is undefined');
-
-    // Without wait, nextIdle is how to know the writes above have reached Buttress.
-    await db.nextIdle('organisation');
-
-    const res = db.delete(entityPath);
-    expect(res).to.equal(true);
-
-    const value = db.get(entityPath);
-    expect(value).to.equal(undefined);
-  });
-
-  describe('awaiting writes', () => {
-    let awaitedPath: string | undefined;
+  describe('as the app', () => {
+    let db: ButtressDbService;
 
     // count() always asks Buttress, so it shows what Buttress has rather than what's in the local store.
     const countNamed = (name: string) => db.count('organisation', { name: { $eq: name } });
 
-    it('should resolve a create once Buttress has the entity', async () => {
-      const payload = db.createObject('organisation');
-      payload.name = 'Awaited Org';
-      payload.number = 456;
-      payload.status = 'active';
-
-      awaitedPath = await db.create('organisation', payload, { wait: true });
-
-      expect(awaitedPath).to.match(/organisation\.[a-f0-9]{24}/);
-      expect(await countNamed('Awaited Org')).to.equal(1);
+    before(async () => {
+      db = await connectAs(APP_TOKEN);
     });
 
-    it('should resolve a set once Buttress has the change', async () => {
-      if (awaitedPath === undefined) throw new Error('awaitedPath is undefined');
-
-      await db.set(`${awaitedPath}.name`, 'Awaited Org 2', { wait: true });
-
-      expect(await countNamed('Awaited Org 2')).to.equal(1);
+    it('connects', () => {
+      expect(db.isDbConnected()).to.equal(true);
     });
 
-    it('should resolve a delete once Buttress has removed the entity', async () => {
-      if (awaitedPath === undefined) throw new Error('awaitedPath is undefined');
+    it('queries every property of the seeded organisations', async () => {
+      const { total, results } = await db.query('organisation', { name: { $in: SEEDED_NAMES } });
 
-      expect(await db.delete(awaitedPath, { wait: true })).to.equal(true);
-
-      expect(await countNamed('Awaited Org 2')).to.equal(0);
+      expect(total).to.equal(10);
+      expect(visible(results)).to.deep.equal(SEEDED);
     });
 
-    it('should reject a write that Buttress rejects', async () => {
-      // number and status are required, so Buttress refuses the entity.
-      const payload = db.createObject('organisation');
-      payload.name = 'Incomplete Org';
-      delete payload.number;
-      delete payload.status;
+    // Without wait, nextIdle is how to know writes have reached Buttress.
+    describe('writes without wait', () => {
+      it('creates an entity', async () => {
+        const path = db.create('organisation', newOrg(db, 'Created Org'))!;
 
-      const err = await db.create('organisation', payload, { wait: true }).catch((e: unknown) => e);
+        expect(path).to.match(/^organisation\.[a-f0-9]{24}$/);
+        await db.nextIdle('organisation');
+        expect(await countNamed('Created Org')).to.equal(1);
+      });
 
-      expect(err).to.be.instanceOf(ButtressError);
-      expect((err as ButtressError).status).to.equal(400);
-      expect(await countNamed('Incomplete Org')).to.equal(0);
+      it('updates an entity', async () => {
+        const path = db.create('organisation', newOrg(db, 'Updated Org'))!;
+
+        db.set(`${path}.name`, 'Updated Org 2');
+
+        expect(db.get(`${path}.name`)).to.equal('Updated Org 2');
+        await db.nextIdle('organisation');
+        expect(await countNamed('Updated Org')).to.equal(0);
+        expect(await countNamed('Updated Org 2')).to.equal(1);
+      });
+
+      it('deletes an entity', async () => {
+        const path = db.create('organisation', newOrg(db, 'Deleted Org'))!;
+        await db.nextIdle('organisation');
+
+        expect(db.delete(path)).to.equal(true);
+
+        expect(db.get(path)).to.equal(undefined);
+        await db.nextIdle('organisation');
+        expect(await countNamed('Deleted Org')).to.equal(0);
+      });
+    });
+
+    describe('writes with wait', () => {
+      it('resolves a create once Buttress has the entity', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Awaited Org'), { wait: true }))!;
+
+        expect(path).to.match(/^organisation\.[a-f0-9]{24}$/);
+        expect(await countNamed('Awaited Org')).to.equal(1);
+      });
+
+      it('resolves a set once Buttress has the change', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Awaited Update'), { wait: true }))!;
+
+        await db.set(`${path}.name`, 'Awaited Update 2', { wait: true });
+
+        expect(await countNamed('Awaited Update 2')).to.equal(1);
+      });
+
+      it('resolves a delete once Buttress has removed the entity', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Awaited Delete'), { wait: true }))!;
+
+        expect(await db.delete(path, { wait: true })).to.equal(true);
+
+        expect(await countNamed('Awaited Delete')).to.equal(0);
+      });
+
+      // The first set goes alone, and the two queued behind it go as one bulk update, which Buttress answers for each.
+      it('rejects only the update in a bundle that Buttress refuses', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Refused Update'), { wait: true }))!;
+
+        const [named, numbered, statused] = await Promise.all(
+          [
+            db.set(`${path}.name`, 'Refused Update 2', { wait: true }),
+            db.set(`${path}.number`, 'not a number', { wait: true }),
+            db.set(`${path}.status`, 'inactive', { wait: true }),
+          ].map((write) => write.catch((e: unknown) => e)),
+        );
+
+        expect(named).to.equal(`${path}.name`);
+        expect(numbered).to.be.instanceOf(ButtressError);
+        expect((numbered as ButtressError).status).to.equal(400);
+        expect(statused).to.equal(`${path}.status`);
+        expect(
+          await db.count('organisation', { name: { $eq: 'Refused Update 2' }, status: { $eq: 'inactive' } }),
+        ).to.equal(1);
+      });
+
+      it('stores whole arrays set into typed arrays as they were sent', async () => {
+        const path = (await db.create('organisation', newOrg(db, 'Array Org'), { wait: true }))!;
+
+        await db.set(`${path}.tags`, ['b', 'a'], { wait: true });
+        await db.set(
+          `${path}.contacts`,
+          [
+            { name: 'A', qty: 1 },
+            { name: 'B', qty: 2 },
+          ],
+          { wait: true },
+        );
+        // Buttress can't insert into the middle of an array, so this sends the whole array too.
+        await db.spliceWith(`${path}.contacts`, 1, 0, { wait: true }, { name: 'M', qty: 5 });
+
+        // Read with another client, so the arrays come from Buttress rather than this store.
+        const reader = await connectAs(APP_TOKEN);
+        const { results } = await reader.query('organisation', { name: { $eq: 'Array Org' } });
+        const contacts = results[0].contacts as Entity[];
+        expect(results[0].tags).to.deep.equal(['b', 'a']);
+        expect(contacts.map(({ name, qty }) => ({ name, qty }))).to.deep.equal([
+          { name: 'A', qty: 1 },
+          { name: 'M', qty: 5 },
+          { name: 'B', qty: 2 },
+        ]);
+      });
+
+      it('rejects a write that Buttress rejects', async () => {
+        // number and status are required, so Buttress refuses the entity.
+        const payload = db.createObject('organisation');
+        payload.name = 'Incomplete Org';
+        delete payload.number;
+        delete payload.status;
+
+        const err = await db.create('organisation', payload, { wait: true }).catch((e: unknown) => e);
+
+        expect(err).to.be.instanceOf(ButtressError);
+        expect((err as ButtressError).status).to.equal(400);
+        expect(await countNamed('Incomplete Org')).to.equal(0);
+      });
     });
   });
 
-  describe('Policy', () => {
-    it('should connect and have access to all the records but no number property', async () => {
-      const db1: ButtressDbService = await fixture(html`
-        <buttress-db-service
-          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-          token="${TEST_USER1_TOKEN}"
-          api-path="test"
-        ></buttress-db-service>
-      `);
+  // Each test waits up to 5s for each write to reach the watcher, so needs longer than Mocha's default 2s.
+  describe('realtime', () => {
+    const eventually = (check: () => boolean, message: string) => waitUntil(check, message, { timeout: 5000 });
 
-      await db1.connect();
+    // Two clients of the app. Each has its own session, so the watcher applies the writer's writes.
+    const clients = async () => ({ watcher: await connectAs(APP_TOKEN), writer: await connectAs(APP_TOKEN) });
 
-      expect(db1.isDbConnected()).to.equal(true);
+    it("applies another client's creates and updates to the store", async function () {
+      this.timeout(15000);
+      const { watcher, writer } = await clients();
 
-      const queryCall = await db1.query('organisation', {}); // { total: 0, results: [], skip: undefined, limit: undefined });
-      expect(queryCall.total).equal(10);
-      expect(queryCall.results).to.be.an('array');
+      const path = (await writer.create('organisation', newOrg(writer, 'Realtime Org'), { wait: true }))!;
+      const watchedName = () => watcher.get(`${path}.name`) as unknown;
+      await eventually(() => watchedName() === 'Realtime Org', 'the create to reach the watcher');
+
+      await writer.set(`${path}.name`, 'Realtime Org 2', { wait: true });
+      await eventually(() => watchedName() === 'Realtime Org 2', 'the update to reach the watcher');
     });
 
-    it('should connect and have access to all the records but no status property', async () => {
-      const db2: ButtressDbService = await fixture(html`
-        <buttress-db-service
-          endpoint="BUILD_REPLACE_TESTE2E_WITH_ENDPOINT"
-          token="${TEST_USER2_TOKEN}"
-          api-path="test"
-        ></buttress-db-service>
-      `);
+    it("applies another client's bundled updates to the store", async function () {
+      this.timeout(15000);
+      const { watcher, writer } = await clients();
+      const path = (await writer.create('organisation', newOrg(writer, 'Bundled Org'), { wait: true }))!;
+      await eventually(() => watcher.get(path) !== undefined, 'the create to reach the watcher');
 
-      await db2.connect();
+      // The first set goes alone, and the two queued behind it go as one bulk update.
+      await Promise.all([
+        writer.set(`${path}.name`, 'Bundled Org 2', { wait: true }),
+        writer.set(`${path}.number`, 456, { wait: true }),
+        writer.set(`${path}.status`, 'inactive', { wait: true }),
+      ]);
+      const watched = (key: string) => watcher.get(`${path}.${key}`) as unknown;
+      await eventually(
+        () => watched('name') === 'Bundled Org 2' && watched('number') === 456 && watched('status') === 'inactive',
+        'the bundled updates to reach the watcher',
+      );
+    });
 
-      expect(db2.isDbConnected()).to.equal(true);
+    it("applies another client's deletes to the store", async function () {
+      this.timeout(15000);
+      const { watcher, writer } = await clients();
 
-      const queryCall = await db2.query('organisation', {}); // { total: 0, results: [], skip: undefined, limit: undefined });
-      expect(queryCall.total).equal(10);
-      expect(queryCall.results).to.be.an('array');
+      const path = (await writer.create('organisation', newOrg(writer, 'Realtime Delete'), { wait: true }))!;
+      await eventually(() => watcher.get(path) !== undefined, 'the create to reach the watcher');
+
+      await writer.delete(path, { wait: true });
+      await eventually(() => watcher.get(path) === undefined, 'the delete to reach the watcher');
+    });
+  });
+
+  // scripts/e2e-seed.js gives user 1 policy-test-1, which lets through name and status. User 2 also gets
+  // policy-test-2, which lets through number for organisations whose number is 50 or more. Buttress sends those
+  // organisations twice, once for each policy, and the store merges them.
+  describe('policies', () => {
+    // What the user sees of the seeded organisations. The query is empty because Buttress leaves out what a policy
+    // lets through when the query filters on a property that policy hides: filtering on name would lose the numbers.
+    const seededAs = async (token: string) => {
+      const db = await connectAs(token);
+      const { results } = await db.query('organisation', {});
+      return visible(results.filter((org) => SEEDED_NAMES.includes(org.name)));
+    };
+
+    it('shows user 1 the name and status of every organisation, and no number', async () => {
+      expect(await seededAs(USER1_TOKEN)).to.deep.equal(SEEDED.map(({ name, status }) => ({ name, status })));
+    });
+
+    it('shows user 2 the name and status of every organisation, and the number of those numbered 50 or more', async () => {
+      expect(await seededAs(USER2_TOKEN)).to.deep.equal(
+        SEEDED.map(({ name, number, status }) => (number >= 50 ? { name, number, status } : { name, status })),
+      );
     });
   });
 });

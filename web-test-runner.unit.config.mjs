@@ -16,12 +16,20 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   concurrency: 1,
 
   /**
-   * Used when run with --coverage (npm run test:coverage). The run fails if coverage drops below these
-   * floors, which sit just under the current figures: raise them as coverage improves.
+   * Chrome gets 90s, not the default 30s, to open a test page. On a slow CI runner it has taken longer than 30s,
+   * failing the run before any test started.
+   */
+  browserStartTimeout: 90000,
+
+  /**
+   * Used when run with --coverage (npm run test:coverage). The run fails if coverage drops below these floors.
+   * Every branch is covered, but the merged report shows a few in ButtressStore and Logger as missed: when a test
+   * file runs on a page an earlier file used, V8 reports fewer block ranges for modules it loaded before. Each
+   * file run on its own (--files) reports them covered.
    */
   coverageConfig: {
     include: ['src/**/*.ts'],
-    threshold: { statements: 50, branches: 75, functions: 35, lines: 50 },
+    threshold: { statements: 100, branches: 99, functions: 100, lines: 100 },
   },
   plugins: [
     importMapsPlugin({ inject: {

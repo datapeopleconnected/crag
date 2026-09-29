@@ -17,6 +17,13 @@ if (!env.BUTTRESS_E2E_ENDPOINT) {
 
 export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
   files: '.test-bundle/*.test.js',
+
+  /**
+   * Chrome gets 90s, not the default 30s, to open a test page. On a slow CI runner it has taken longer than 30s,
+   * failing the run before any test started.
+   */
+  browserStartTimeout: 90000,
+
   plugins: [
     replace({
       preventAssignment: true,

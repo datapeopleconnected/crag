@@ -144,3 +144,180 @@ describe('ButtressStore forceChanged', () => {
     expect(notified).to.deep.equal([{ forceChanged: true }]);
   });
 });
+
+describe('ButtressStore writes', () => {
+  it('throws for a create without an id', () => {
+    const store = storeWith({ id: 'org1' });
+
+    expect(() => store.create('organisation', { id: '' })).to.throw('Unable to create object without providing an ID');
+  });
+
+  it('throws for a delete of a path without an id', () => {
+    const store = storeWith({ id: 'org1' });
+
+    expect(() => store.delete('organisation.')).to.throw('Unable to remove property');
+  });
+
+  it('deletes a property of an object', () => {
+    const store = storeWith({ id: 'org1', name: 'a' });
+
+    expect(store.delete('organisation.org1.name')).to.equal(true);
+    expect(store.get('organisation.org1')).to.deep.equal({ id: 'org1' });
+  });
+
+  it('returns false for a delete of an entity that is not in the store', () => {
+    const store = storeWith({ id: 'org1' });
+
+    expect(store.delete('organisation.missing')).to.equal(false);
+  });
+
+  it('resolves dboComplete for a set that changes nothing', () => {
+    const store = storeWith({ id: 'org1', name: 'a' });
+    let resolved = false;
+
+    store.set('organisation.org1.name', 'a', {
+      dboComplete: {
+        resolve: () => {
+          resolved = true;
+        },
+        reject: () => {},
+      },
+    });
+
+    expect(resolved).to.equal(true);
+  });
+
+  it('pushes without options', () => {
+    const store = storeWith({ id: 'org1', tags: ['a'] });
+
+    expect(store.push('organisation.org1.tags', schema, 'b', 'c')).to.equal(3);
+    expect(store.get('organisation.org1.tags')).to.deep.equal(['a', 'b', 'c']);
+  });
+
+  it('counts a negative splice start from the end', () => {
+    const store = storeWith({ id: 'org1', tags: ['a', 'b', 'c'] });
+
+    expect(store.splice('organisation.org1.tags', schema, -2, 1)).to.deep.equal(['b']);
+    expect(store.get('organisation.org1.tags')).to.deep.equal(['a', 'c']);
+  });
+
+  it('reports no change from notifyPath with only a path', () => {
+    const store = storeWith({ id: 'org1', name: 'a' });
+
+    expect(store.notifyPath('organisation.org1.name')).to.equal(false);
+  });
+});
+
+describe('ButtressStore subscriptions', () => {
+  // A store with org1 in it, past the notification of setting it up.
+  const subscribed = async (paths: string, entity: ButtressEntity = { id: 'org1', name: 'a', tags: ['a'] }) => {
+    const store = storeWith(entity);
+    await Promise.resolve();
+    const calls: unknown[][] = [];
+    const id = store.subscribe(paths, (...args: unknown[]) => calls.push(args));
+    return { store, calls, id };
+  };
+
+  it('calls a subscriber to a whole collection', async () => {
+    const { store, calls } = await subscribed('organisation');
+
+    store.set('organisation', new Map());
+    await Promise.resolve();
+
+    expect(calls).to.have.length(1);
+  });
+
+  it('calls a wildcard subscriber once for each splice of an array', async () => {
+    const { store, calls } = await subscribed('organisation.*');
+
+    store.push('organisation.org1.tags', schema, 'b');
+    store.push('organisation.org1.tags', schema, 'c');
+    await Promise.resolve();
+
+    const paths = calls.map(([cr]) => (cr as { path: string }).path);
+    expect(paths).to.deep.equal(['organisation.org1.tags.splices', 'organisation.org1.tags.splices']);
+  });
+
+  it('notifies each change of a path once, with its latest value', async () => {
+    const { store, calls } = await subscribed('organisation.org1.name');
+
+    store.set('organisation.org1.name', 'b');
+    store.set('organisation.org1.name', 'c');
+    await Promise.resolve();
+
+    expect(calls.map(([cr]) => (cr as { value: unknown }).value)).to.deep.equal(['c']);
+  });
+
+  it('notifies both forced and ordinary changes made together', async () => {
+    const { store, calls } = await subscribed('organisation.*');
+
+    store.set('organisation.org1.name', 'a', { forceChanged: true });
+    store.set('organisation.org1.tags', ['a'], { forceChanged: true });
+    store.set('organisation.org1.status', 'new');
+    await Promise.resolve();
+
+    expect(calls.map(([cr]) => (cr as { path: string }).path)).to.deep.equal([
+      'organisation.org1.name',
+      'organisation.org1.tags',
+      'organisation.org1.status',
+    ]);
+  });
+
+  it('passes the value of every path subscribed to together, whichever changed', async () => {
+    const { store, calls } = await subscribed('organisation.org1.name, organisation.*, organisation');
+
+    store.set('organisation.org1.name', 'b');
+    await Promise.resolve();
+
+    // Called for the first two paths, which both match, but not the third.
+    expect(calls).to.have.length(2);
+    const [name, wildcard, collection] = calls[0] as { path?: string; value: unknown; base?: unknown }[];
+    expect(name.value).to.equal('b');
+    expect(wildcard.path).to.equal('organisation.org1.name');
+    expect(wildcard.base).to.equal(store.get('organisation'));
+    expect(collection.value).to.equal(store.get('organisation'));
+  });
+
+  it('passes a wildcard path that did not change as its current value', async () => {
+    const { store, calls } = await subscribed('organisation.org1.name, organisation.org1.tags.*');
+
+    store.set('organisation.org1.name', 'b');
+    await Promise.resolve();
+
+    const [, tags] = calls[0] as { path: string; value: unknown; base: unknown }[];
+    expect(tags).to.include({ path: 'organisation.org1.tags', value: store.get('organisation.org1.tags') });
+    expect(tags.base).to.equal(tags.value);
+  });
+
+  it('passes the value it was notified with for a path that is no longer in the store', async () => {
+    const { store, calls } = await subscribed('organisation.org1.name, organisation.*');
+
+    store.notifyPath('organisation.org1.name', 'b');
+    store.delete('organisation.org1');
+    await Promise.resolve();
+
+    const [name, wildcard] = calls[0] as { value: unknown }[];
+    expect(name.value).to.equal('b');
+    expect(wildcard.value).to.equal('b');
+  });
+
+  it('passes literal arguments as they are written', async () => {
+    const { store, calls } = await subscribed(`organisation.org1.name, 'text', "quoted", 42, -1.5`);
+
+    store.set('organisation.org1.name', 'b');
+    await Promise.resolve();
+
+    expect(calls[0].slice(1)).to.deep.equal(['text', 'quoted', 42, -1.5]);
+  });
+
+  it('stops calling a subscriber once it unsubscribes', async () => {
+    const { store, calls, id } = await subscribed('organisation.org1.name');
+
+    expect(store.unsubscribe(id)).to.equal(true);
+    store.set('organisation.org1.name', 'b');
+    await Promise.resolve();
+
+    expect(calls).to.deep.equal([]);
+    expect(store.unsubscribe(id)).to.equal(false);
+  });
+});
