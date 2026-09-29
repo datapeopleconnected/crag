@@ -79,6 +79,9 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // Bumped by a create: cached pages from an earlier generation are searched for again.
   private __pageGeneration = 0;
 
+  // Bumped when the query cache is cleared: a search sent before then isn't cached when it comes back.
+  private __cacheEpoch = 0;
+
   // One for each search or GET that's queued or waiting for its response. The response is older than the writes
   // recorded in it, since Buttress hadn't had them when it answered, so merging it mustn't undo them.
   private __reads: Set<Written> = new Set();
@@ -492,21 +495,26 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
     // Fetches the matching entities into the local store, unless this search is cached.
-    await this.search(buttressQuery, opts);
+    const found = await this.search(buttressQuery, opts);
+    // The ids of the page: those this search found, or else the cached ones, which search() only answers from when it
+    // has them. Taken now, since a resync can clear the cache while the count is out, and a search that was out when
+    // the cache was cleared isn't cached.
+    const pageIds = found
+      ? ButtressDataService.__ids(found)
+      : this._queryCache.get(this.__queryKey(buttressQuery, opts))!.ids;
 
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
     const paged = ButtressDataService.__isPaged(opts);
-    const results = paged ? this.__cachedPage(buttressQuery, opts) : this.__filterLocalData(buttressQuery, opts?.sort);
+    const results = paged ? this.__page(buttressQuery, pageIds) : this.__filterLocalData(buttressQuery, opts?.sort);
 
     return { skip: opts?.skip, limit: opts?.limit, total, results };
   }
 
   // A page can't be cut from the store, which may hold matches the server left off it, so a
   // page is the entities the server sent, less any since deleted or changed so they don't match.
-  private __cachedPage(buttressQuery: any, opts?: QueryOpts): ButtressEntity[] {
-    const ids = this._queryCache.get(this.__queryKey(buttressQuery, opts))?.ids || [];
+  private __page(buttressQuery: any, ids: string[]): ButtressEntity[] {
     const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
     // _processQueryPart can reorder the entities ($or does), so keep the server's order.
     const matching = new Set(this.__matchLocally(buttressQuery, entities));
@@ -679,6 +687,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const key = this.__queryKey(buttressQuery, opts);
     const paged = ButtressDataService.__isPaged(opts);
     const generation = this.__pageGeneration;
+    const epoch = this.__cacheEpoch;
     const cached = this._queryCache.get(key);
     if (!opts?.bust && cached && (!cached.paged || cached.generation === generation)) {
       return false;
@@ -714,13 +723,21 @@ export default class ButtressDataService implements ButtressStoreInterface {
       this._store.set(this.name, new Map([...entities, ...added]), {
         silent: true,
       });
-      // The generation from when the search was sent, so a create while it was out makes this page stale.
-      this._queryCache.set(key, { ids: [...new Set(body.map((o) => o.id))], paged, generation });
+      // The generation from when the search was sent, so a create while it was out makes this page stale. A search
+      // that was out when the cache was cleared, as it is by a resync, may be missing the changes the resync is for.
+      if (epoch === this.__cacheEpoch) {
+        this._queryCache.set(key, { ids: ButtressDataService.__ids(body), paged, generation });
+      }
 
       return body;
     } finally {
       this.__reads.delete(written);
     }
+  }
+
+  // The ids of the entities a search found, in the order Buttress sent them, each once.
+  private static __ids(entities: ButtressEntity[]): string[] {
+    return [...new Set(entities.map((entity) => entity.id))];
   }
 
   private static __without(entity: ButtressEntity, keys: Set<string>): ButtressEntity {
@@ -733,6 +750,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   clearQueryMap() {
     this._queryCache.clear();
+    this.__cacheEpoch += 1;
   }
 
   // Whether it holds any entities or cached queries.

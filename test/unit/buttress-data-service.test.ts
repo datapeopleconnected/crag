@@ -591,6 +591,57 @@ describe('ButtressDataService query', () => {
     });
   });
 
+  // A resync clears the cache because updates may have been missed. A search sent before it may be missing them too.
+  describe('with the query cache cleared while a search is out', () => {
+    let release: () => void;
+    const clearedWhileOut = async (ds: ButtressDataService, opts: object) => {
+      holdSearches = new Promise((resolve) => {
+        release = resolve;
+      });
+      const loading = ds.query(active, opts);
+      await flush();
+      ds.clearQueryMap();
+      release();
+      return loading;
+    };
+
+    it('searches again for the query', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { sort: byName });
+      await ds.query(active, { sort: byName });
+
+      expect(searches).to.equal(2);
+    });
+
+    it('searches again for the page', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { limit: 10, sort: byName });
+      const { results } = await ds.query(active, { limit: 10, sort: byName });
+
+      expect(searches).to.equal(2);
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
+
+    // Not cached, but still the page Buttress sent, as paged queries always are.
+    it('still returns the page the search found', async () => {
+      const ds = dataService();
+
+      const { results } = await clearedWhileOut(ds, { limit: 10, sort: byName });
+
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
+
+    it('still keeps the entities the search found', async () => {
+      const ds = dataService();
+
+      await clearedWhileOut(ds, { sort: byName });
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'A01', status: 'active' });
+    });
+  });
+
   it('keeps cached unpaged queries after a create', async () => {
     const ds = dataService();
     await ds.query(active, { sort: byName });
@@ -641,19 +692,36 @@ describe('ButtressDataService query', () => {
     expect(results).to.deep.equal([{ id: 'id01', name: 'A01', status: 'active' }]);
   });
 
-  it('returns an empty page when the query cache is cleared while the page loads', async () => {
-    const ds = dataService();
-    const fetchPage = window.fetch;
-    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      // A resync clearing the cache between the search and the count.
-      if (new URL(input.toString()).pathname.endsWith('/count')) ds.clearQueryMap();
-      return fetchPage(input, init);
+  describe('with the query cache cleared while the count is out', () => {
+    // A resync clearing the cache between the search and the count.
+    const clearOnCount = (ds: ButtressDataService) => {
+      const fetchPage = window.fetch;
+      window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new URL(input.toString()).pathname.endsWith('/count')) ds.clearQueryMap();
+        return fetchPage(input, init);
+      };
     };
 
-    const { results, total } = await ds.query(active, { limit: 10 });
+    it('returns the page it searched for', async () => {
+      const ds = dataService();
+      clearOnCount(ds);
 
-    expect(results).to.deep.equal([]);
-    expect(total).to.equal(25);
+      const { results, total } = await ds.query(active, { limit: 10 });
+
+      expect(names(results)).to.deep.equal(range(1, 10));
+      expect(total).to.equal(25);
+    });
+
+    it('returns the cached page it was answered from', async () => {
+      const ds = dataService();
+      await ds.query(active, { limit: 10 });
+      clearOnCount(ds);
+
+      const { results } = await ds.query(active, { limit: 10 });
+
+      expect(searches).to.equal(1);
+      expect(names(results)).to.deep.equal(range(1, 10));
+    });
   });
 
   it('logs the query and throws when the store cannot run it', async () => {
