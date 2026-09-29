@@ -151,7 +151,7 @@ any time.
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `get(path)`                          | Reads from the local store. Returns `undefined` for anything that isn't loaded.                        |
 | `query(schema, query, opts?)`        | Loads matching entities into the store and resolves to `{ total, results, skip, limit }`. See [Queries](#queries). |
-| `getById(schema, id)`                | Resolves to the entity, from the store if it's loaded and from Buttress if not.                        |
+| `getById(schema, id)`                | Resolves to the entity, from the store if it's loaded and from Buttress if not, or to `undefined` if it was deleted while being fetched. |
 | `count(schema, query, actualCount?)` | Resolves to the number of matching entities, as counted by Buttress.                                    |
 | `getSchema(name)`                    | The schema definition, or `false` if there's no such schema.                                            |
 
@@ -227,7 +227,8 @@ db.unsubscribe(id);
 ```
 
 Callbacks run in a microtask, after the store has changed. Entities loaded by `query()` and `getById()` are added to
-the store without notifying subscribers, so use the values those methods return.
+the store without notifying subscribers, so use the values those methods return. A write made while a query or
+`getById()` is waiting for Buttress keeps its value: the response, which is older, doesn't overwrite it.
 
 ### Settings
 

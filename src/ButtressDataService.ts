@@ -48,6 +48,10 @@ export interface QueryOpts {
   actualCount?: boolean;
 }
 
+// The keys of each entity written locally while a search or GET was out, or true for an entity created, replaced or
+// deleted meanwhile.
+type Written = Map<string, Set<string> | true>;
+
 export default class ButtressDataService implements ButtressStoreInterface {
   name: string;
 
@@ -70,6 +74,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // Bumped by a create: cached pages from an earlier generation are searched for again.
   private __pageGeneration = 0;
+
+  // One for each search or GET that's queued or waiting for its response. The response is older than the writes
+  // recorded in it, since Buttress hadn't had them when it answered, so merging it mustn't undo them.
+  private __reads: Set<Written> = new Set();
 
   core: boolean = false;
 
@@ -116,6 +124,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const path = this._store.create(this.name, value, ButtressDataService.__storeOpts(opts));
+    this.__recordWrite(val.id);
     // Only Buttress can say which page a new entity belongs on.
     this.__pageGeneration += 1;
     this.__send(opts, () => [this.__generateAddRequest(value)]);
@@ -130,9 +139,31 @@ export default class ButtressDataService implements ButtressStoreInterface {
     }
 
     const deleted = this._store.delete(`${this.name}.${id}`, ButtressDataService.__storeOpts(opts));
+    this.__recordWrite(id);
     this.__send(opts, () => [this.__generateRmRequest(id)]);
 
     return deleted;
+  }
+
+  // Records a write to an entity, or to one of its top-level keys, for each search or GET that's out.
+  private __recordWrite(id: string, key?: string) {
+    this.__reads.forEach((written) => {
+      const keys = written.get(id);
+      if (keys === true) return;
+      if (key === undefined) {
+        written.set(id, true);
+      } else if (keys) {
+        keys.add(key);
+      } else {
+        written.set(id, new Set([key]));
+      }
+    });
+  }
+
+  private __startRead(): Written {
+    const written: Written = new Map();
+    this.__reads.add(written);
+    return written;
   }
 
   // Data accessors
@@ -157,6 +188,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
     // A set of the whole collection is only ever local.
     const entityPath = parts.slice(2).join('.');
+    if (changed && entityPath) this.__recordWrite(parts[1], parts[2]);
     this.__send(opts, () => (changed && entityPath ? [this.__generateUpdateRequest(parts[1], entityPath, value)] : []));
 
     return setPath;
@@ -194,6 +226,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
         ? { ...ButtressDataService.__storeOpts(opts), forceChanged: true }
         : ButtressDataService.__storeOpts(opts);
     const setPath = this._store.set(`${this.name}.${id}`, value, storeOpts);
+    this.__recordWrite(id);
 
     if (!existing) {
       this.__pageGeneration += 1;
@@ -248,6 +281,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const length = this._store.pushExt(path, this._schema, ButtressDataService.__storeOpts(opts), ...items);
 
     const [, id, ...arrayPath] = path.split('.');
+    if (items.length > 0) this.__recordWrite(id, arrayPath[0]);
     this.__send(opts, () => items.map((item) => this.__generateUpdateRequest(id, arrayPath.join('.'), item)));
 
     return length;
@@ -277,6 +311,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
     const [, id, ...rest] = path.split('.');
     const arrayPath = rest.join('.');
+    if (removed.length > 0 || items.length > 0) this.__recordWrite(id, rest[0]);
     this.__send(opts, () => {
       // Each remove shifts the items after it down, so every one is at the same index.
       if (items.length === 0)
@@ -303,17 +338,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const storeEntity = this.get(`${this.name}.${id}`);
     if (storeEntity) return storeEntity;
 
-    const entity = await this.__generateGetByIdRequest(id);
+    const written = this.__startRead();
+    try {
+      const entity = await this.__generateGetByIdRequest(id);
 
-    // If it reached the store while the request was out, anything else holding it holds the store's object.
-    const arrived = this._store.get(`${this.name}.${entity.id}`);
-    if (arrived) return arrived;
+      // If it reached the store while the request was out, anything else holding it holds the store's object.
+      const arrived = this._store.get(`${this.name}.${entity.id}`);
+      if (arrived) return arrived;
+      // It was in the store while the request was out, and has been deleted since.
+      if (written.has(entity.id)) return undefined;
 
-    this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
-      silent: true,
-    });
+      this._store.set(this.name, new Map([...this.get(this.name), [entity.id, entity]]), {
+        silent: true,
+      });
 
-    return entity;
+      return entity;
+    } finally {
+      this.__reads.delete(written);
+    }
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
@@ -516,27 +558,40 @@ export default class ButtressDataService implements ButtressStoreInterface {
       sort[opts.sort.path] = opts.sort.direction === 'ASC' ? 1 : -1;
     }
 
-    const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
+    const written = this.__startRead();
+    try {
+      const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
 
-    const entities: Map<string, ButtressEntity> = this.get(this.name);
-    const added: Map<string, ButtressEntity> = new Map();
-    for (const o of body) {
-      // Merged into the object already in the store, so anything holding it sees the fresh values.
-      const held = added.get(o.id) ?? entities.get(o.id);
-      if (held) {
-        Object.assign(held, o);
-      } else {
-        added.set(o.id, o);
+      const entities: Map<string, ButtressEntity> = this.get(this.name);
+      const added: Map<string, ButtressEntity> = new Map();
+      for (const o of body) {
+        const keys = written.get(o.id);
+        // Created, replaced or deleted while the search was out.
+        if (keys === true) continue;
+        const fresh = keys ? ButtressDataService.__without(o, keys) : o;
+        // Merged into the object already in the store, so anything holding it sees the fresh values.
+        const held = added.get(o.id) ?? entities.get(o.id);
+        if (held) {
+          Object.assign(held, fresh);
+        } else {
+          added.set(o.id, fresh);
+        }
       }
+
+      this._store.set(this.name, new Map([...entities, ...added]), {
+        silent: true,
+      });
+      // The generation from when the search was sent, so a create while it was out makes this page stale.
+      this._queryCache.set(key, { ids: [...new Set(body.map((o) => o.id))], paged, generation });
+
+      return body;
+    } finally {
+      this.__reads.delete(written);
     }
+  }
 
-    this._store.set(this.name, new Map([...entities, ...added]), {
-      silent: true,
-    });
-    // The generation from when the search was sent, so a create while it was out makes this page stale.
-    this._queryCache.set(key, { ids: [...new Set(body.map((o) => o.id))], paged, generation });
-
-    return body;
+  private static __without(entity: ButtressEntity, keys: Set<string>): ButtressEntity {
+    return Object.fromEntries(Object.entries(entity).filter(([key]) => !keys.has(key))) as ButtressEntity;
   }
 
   async count(buttressQuery: any, actualCount?: boolean): Promise<number> {

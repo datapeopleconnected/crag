@@ -503,6 +503,92 @@ describe('ButtressDataService query', () => {
     expect(names(results)).to.deep.equal(['A00', ...range(1, 9)]);
   });
 
+  // A search's response is older than a write made while it was out: Buttress hadn't had the write when it searched.
+  describe('with a write made while a search is out', () => {
+    let release: () => void;
+    const hold = () => {
+      holdSearches = new Promise((resolve) => {
+        release = resolve;
+      });
+    };
+
+    it('keeps the write', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const loading = ds.query(active, { sort: byName, bust: true });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      ds.set('organisation.id01.note', 'renamed');
+      release();
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'Z01', status: 'active', note: 'renamed' });
+      expect(results.find((r) => r.id === 'id01')?.name).to.equal('Z01');
+    });
+
+    it('keeps the write when the search was still queued', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const first = ds.query(active, { sort: byName, bust: true });
+      // Queued behind the first, and sent before the update, which is queued behind it.
+      const second = ds.query(active, { limit: 10, sort: byName });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      release();
+      await Promise.all([first, second]);
+
+      expect(searches).to.equal(3);
+      expect(ds.get('organisation.id01.name')).to.equal('Z01');
+    });
+
+    it('still merges the fresh values of the other properties', async () => {
+      const ds = dataService();
+      await ds.query({});
+      // Changed by another client.
+      server[0].status = 'archived';
+      hold();
+
+      const loading = ds.query({}, { bust: true });
+      await flush();
+      ds.set('organisation.id01.name', 'Z01');
+      release();
+      await loading;
+
+      expect(ds.get('organisation.id01')).to.deep.equal({ id: 'id01', name: 'Z01', status: 'archived' });
+    });
+
+    it('does not bring back an entity deleted meanwhile', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      hold();
+
+      const loading = ds.query(active, { sort: byName, bust: true });
+      await flush();
+      ds.delete('id02');
+      release();
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id02')).to.equal(undefined);
+      expect(names(results)).to.not.include('A02');
+    });
+
+    it('keeps a set made just after a create and a paged query', async () => {
+      const ds = dataService();
+
+      ds.create({ id: 'id00', name: 'A00', status: 'active' });
+      const loading = ds.query(active, { limit: 10, sort: byName });
+      ds.set('organisation.id00.name', 'B00');
+      const { results } = await loading;
+
+      expect(ds.get('organisation.id00.name')).to.equal('B00');
+      expect(results[0]).to.deep.equal({ id: 'id00', name: 'B00', status: 'active' });
+    });
+  });
+
   it('keeps cached unpaged queries after a create', async () => {
     const ds = dataService();
     await ds.query(active, { sort: byName });
@@ -1234,6 +1320,18 @@ describe('ButtressDataService getById', () => {
 
     expect(await ds.getById('x')).to.equal(local);
     expect(ds.get('organisation.x')).to.equal(local);
+  });
+
+  it('does not bring back an entity deleted while fetching it', async () => {
+    const ds = dataService();
+    // It reaches the store, as from a realtime post, and is deleted, while the GET is out.
+    onGet = () => {
+      ds.create({ id: 'x', name: 'local' }, { localOnly: true });
+      ds.delete('x', { localOnly: true });
+    };
+
+    expect(await ds.getById('x')).to.equal(undefined);
+    expect(ds.get('organisation.x')).to.equal(undefined);
   });
 });
 
