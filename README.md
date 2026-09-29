@@ -434,9 +434,9 @@ Every run starts from an empty database. If a run fails, the end of the Buttress
 containers of its own, so runs side by side, from two worktrees say, don't get in each other's way, and a run removes
 the containers of any earlier run that was killed before it could.
 
-The first run downloads the images. The Buttress image is pinned in `.docker/docker-compose.e2e.yml` to the oldest
-build crag supports, so a run doesn't change as Buttress moves on; move it on deliberately. To test against a
-different image, such as one built from a Buttress checkout, set `BUTTRESS_IMAGE`:
+The first run downloads the images. The Buttress image is pinned in `.docker/docker-compose.e2e.yml` to a `develop`
+build, so a run doesn't change as Buttress moves on; move it on deliberately. To test against a different image, such
+as one built from a Buttress checkout, set `BUTTRESS_IMAGE`:
 
 ```bash
 docker build -t buttress:local path/to/buttress-js

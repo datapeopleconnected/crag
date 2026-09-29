@@ -20,9 +20,9 @@ services:
       retries: 30
 
   buttress:
-    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 3f044191, the oldest
-    # build crag supports. Move it on deliberately.
-    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-3f04419@sha256:39a585aa63b907a29f1814447e9f84ef09f4f27b71842088f493239af00270e1}
+    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 681f910d. crag needs
+    # 3f044191 or later. Move it on deliberately.
+    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-681f910@sha256:a410bf9a44a328332a920422491f1b3e463c81cfe4b9daa7d02f06ae90d4f1cc}
     # The image is only published for amd64. Without this, Arm machines such as Apple silicon Macs fail to pull it,
     # rather than running it emulated.
     platform: linux/amd64
