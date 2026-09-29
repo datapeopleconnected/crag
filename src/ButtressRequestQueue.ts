@@ -59,7 +59,9 @@ export class ButtressRequestQueue {
 
   push<T = unknown>(request: QueuedRequest): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      this._queue.push({ ...request, resolve: resolve as (data: unknown) => void, reject });
+      // Copied as it will be sent, since it can hold the store's own objects, which may change before it's sent.
+      const body = request.body === undefined ? undefined : JSON.parse(JSON.stringify(request.body));
+      this._queue.push({ ...request, body, resolve: resolve as (data: unknown) => void, reject });
       this._next();
     });
   }

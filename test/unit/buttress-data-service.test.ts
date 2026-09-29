@@ -198,6 +198,80 @@ describe('ButtressDataService request queue', () => {
   });
 });
 
+// A request's body is made from the store's objects, which can change before the request is sent.
+describe('ButtressDataService queued request bodies', () => {
+  type Sent = { method: string; path: string; body?: unknown };
+
+  let originalFetch: typeof window.fetch;
+  let sent: Sent[];
+
+  const listSchema: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: { name: { __type: 'string' }, tags: { __type: 'array' } },
+  };
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    sent = [];
+    Logger.disableLogging = true;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({
+        method: init!.method!,
+        path: new URL(input.toString()).pathname.replace('/api/v1/organisation', ''),
+        body: init?.body ? JSON.parse(init.body as string) : undefined,
+      });
+      return new Response('{}');
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      listSchema,
+    );
+
+  // The first create is sent straight away, so each later one waits in the queue while the push after it runs.
+  it('sends each create as it was made, and not the pushes after it as well', async () => {
+    const ds = dataService();
+
+    for (const name of ['a', 'b', 'c']) {
+      const path = ds.create({ id: name, name, tags: [] });
+      ds.push(`${path}.tags`, 'new');
+    }
+    await ds.nextIdle();
+
+    const creates = sent.filter((r) => r.method === 'POST' && r.path === '/');
+    const bundled = sent.filter((r) => r.path === '/bulk/add').flatMap((r) => r.body as unknown[]);
+    expect([...creates.map((r) => r.body), ...bundled]).to.deep.equal(
+      ['a', 'b', 'c'].map((name) => ({ id: name, name, tags: [] })),
+    );
+    expect(ds.get('organisation.c.tags')).to.deep.equal(['new']);
+  });
+
+  it('sends a create as it was made, and not a splice after it as well', async () => {
+    const ds = dataService();
+    ds.create({ id: 'first', name: 'first', tags: [] });
+
+    ds.create({ id: 'x', name: 'x', tags: ['a', 'b'] });
+    ds.splice('organisation.x.tags', 0, 1);
+    await ds.nextIdle();
+
+    expect(sent.slice(1)).to.deep.equal([
+      { method: 'POST', path: '/', body: { id: 'x', name: 'x', tags: ['a', 'b'] } },
+      { method: 'PUT', path: '/x', body: { path: 'tags.0.__remove__', value: '' } },
+    ]);
+  });
+});
+
 describe('ButtressDataService query', () => {
   type Org = { id: string; name: string; status: string };
 

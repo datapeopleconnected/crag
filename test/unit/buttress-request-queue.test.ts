@@ -140,6 +140,30 @@ describe('ButtressRequestQueue', () => {
     expect((queue as unknown as { _idleWaiters: unknown[] })._idleWaiters.length).to.equal(0);
   });
 
+  it('sends a body as it was when queued', async () => {
+    const bodies: unknown[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client = {
+      request: async (_method: string, _url: string, opts: { body?: unknown }) => {
+        bodies.push(JSON.parse(JSON.stringify(opts.body ?? null)));
+        if (bodies.length === 1) await held;
+        return {};
+      },
+    } as unknown as ButtressClient;
+    const queue = new ButtressRequestQueue(client, () => 'bulk', new Logger('test'));
+    const entity = { id: 'x', tags: ['a'] };
+
+    const done = [queue.push(search()), queue.push({ ...add('x'), body: entity })];
+    entity.tags.push('b');
+    release();
+    await Promise.all(done);
+
+    expect(bodies[1]).to.deep.equal({ id: 'x', tags: ['a'] });
+  });
+
   it('bundles adds that do not name their entity', async () => {
     const anonymous = (body: string): QueuedRequest => ({ type: 'add', method: 'POST', url: 'add', body });
 
