@@ -27,7 +27,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # demo/index.html imports from dist/, which ESLint resolves, so build before linting.
       - run: npm run build
       - run: npm run lint
       - run: npm run format

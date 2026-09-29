@@ -45,10 +45,10 @@
     "publint": "publint && attw --pack . --profile esm-only",
     "prepack": "npm run build",
     "prepare": "husky",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier \"**/*.ts\" --check --ignore-path .gitignore",
-    "format:fix": "prettier \"**/*.ts\" --write --ignore-path .gitignore",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --check \"**/*.ts\"",
+    "format:fix": "oxfmt \"**/*.ts\"",
     "typecheck": "tsc --noEmit -p . && tsc -p test",
     "check": "npm run lint && npm run format && npm run typecheck && npm run test:coverage && npm run test:scripts"
   },
@@ -68,8 +68,6 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@custom-elements-manifest/analyzer": "^0.11.0",
-    "@eslint/js": "^10.0.1",
-    "@open-wc/eslint-config": "^13.1.0",
     "@open-wc/testing": "^5.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-replace": "^6.0.3",
@@ -81,19 +79,17 @@
     "@web/test-runner": "^1.0.0",
     "concurrently": "^10.0.5",
     "esbuild": "^0.28.2",
-    "eslint": "^10.11.0",
-    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-lit": "^2.3.1",
+    "eslint-plugin-no-only-tests": "^3.4.0",
     "eslint-plugin-wc": "^3.1.0",
-    "globals": "^17.12.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
-    "prettier": "^3.9.9",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
     "publint": "^0.3.24",
     "rimraf": "^6.1.3",
     "rollup": "^4.63.5",
-    "typescript": "~6.0.3",
-    "typescript-eslint": "^8.70.1"
+    "typescript": "~6.0.3"
   },
   "devEngines": {
     "runtime": {
@@ -104,8 +100,8 @@
   },
   "lint-staged": {
     "*.ts": [
-      "eslint --fix",
-      "prettier --write"
+      "oxlint --fix",
+      "oxfmt"
     ]
   }
 }

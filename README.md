@@ -414,8 +414,8 @@ npm run test:unit
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
 | `npm run test:scripts`        | Tests the scripts in `scripts/` in Node, with a fake `docker`. No Docker needed. |
 | `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
-| `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
-| `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
+| `npm run lint`                | Runs oxlint. `lint:fix` fixes what it can.                                     |
+| `npm run format`              | Checks formatting with oxfmt. `format:fix` applies it.                         |
 | `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
 | `npm run check`               | Runs `lint`, `format`, `typecheck`, `test:coverage` and `test:scripts`.        |
 | `npm run publint`             | Checks the packed package with publint and Are the Types Wrong.                |
@@ -449,7 +449,7 @@ when you exit it.
 
 ### Commits and publishing
 
-The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with ESLint and Prettier, then
+The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with oxlint and oxfmt, then
 `npm run build` and `npm run licence-check`. Every file in `src/`, `test/` and `scripts/`,
 apart from HTML and JSON, must start with the header in `.husky/licencing_header.txt`.
 

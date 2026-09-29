@@ -1,0 +1,163 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["import", "typescript"],
+  // ESLint plugins with no native oxlint equivalent, run through oxlint's ESLint-compatible plugin host.
+  "jsPlugins": ["eslint-plugin-lit", "eslint-plugin-wc", "eslint-plugin-no-only-tests"],
+  // Only the rules listed below run, matching the ESLint setup this replaced
+  // (eslint:recommended, @open-wc/eslint-config, lit and wc recommended, typescript-eslint recommended).
+  "categories": {
+    "correctness": "off"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "mocha": true
+  },
+  "ignorePatterns": [
+    "build/**",
+    "out-tsc/**",
+    "playwright-report/**",
+    "test-results/**",
+    "dist/**",
+    ".test-bundle/**",
+    "coverage/**",
+    ".claude/**"
+  ],
+  "rules": {
+    "constructor-super": "error",
+    "for-direction": "error",
+    "getter-return": "error",
+    "no-async-promise-executor": "error",
+    "no-case-declarations": "error",
+    "no-class-assign": "error",
+    "no-compare-neg-zero": "error",
+    "no-cond-assign": "error",
+    "no-const-assign": "error",
+    "no-constant-binary-expression": "error",
+    "no-constant-condition": "error",
+    "no-control-regex": "error",
+    "no-debugger": "error",
+    "no-delete-var": "error",
+    "no-dupe-class-members": "error",
+    "no-dupe-else-if": "error",
+    "no-dupe-keys": "error",
+    "no-duplicate-case": "error",
+    "no-empty": "error",
+    "no-empty-character-class": "error",
+    "no-empty-pattern": "error",
+    "no-empty-static-block": "error",
+    "no-ex-assign": "error",
+    "no-extra-boolean-cast": "error",
+    "no-fallthrough": "error",
+    "no-func-assign": "error",
+    "no-global-assign": "error",
+    "no-import-assign": "error",
+    "no-invalid-regexp": "error",
+    "no-irregular-whitespace": "error",
+    "no-loss-of-precision": "error",
+    "no-misleading-character-class": "error",
+    "no-new-native-nonconstructor": "error",
+    "no-nonoctal-decimal-escape": "error",
+    "no-obj-calls": "error",
+    "no-prototype-builtins": "error",
+    "no-redeclare": "error",
+    "no-regex-spaces": "error",
+    "no-self-assign": "error",
+    "no-setter-return": "error",
+    "no-shadow-restricted-names": "error",
+    "no-sparse-arrays": "error",
+    "no-this-before-super": "error",
+    "no-unassigned-vars": "error",
+    "no-unreachable": "error",
+    "no-unsafe-finally": "error",
+    "no-unsafe-negation": "error",
+    "no-unsafe-optional-chaining": "error",
+    "no-unused-labels": "error",
+    "no-unused-private-class-members": "error",
+    "no-unused-vars": "error",
+    "no-useless-backreference": "error",
+    "no-useless-catch": "error",
+    "no-useless-escape": "error",
+    "no-with": "error",
+    "preserve-caught-error": "error",
+    "require-yield": "error",
+    "use-isnan": "error",
+    "valid-typeof": "error",
+    "import/extensions": ["error", "always", { "ignorePackages": true }],
+    "no-only-tests/no-only-tests": "error",
+    "lit/attribute-value-entities": "error",
+    "lit/binding-positions": "error",
+    "lit/lifecycle-super": "error",
+    "lit/no-classfield-shadowing": "error",
+    "lit/no-duplicate-template-bindings": "error",
+    "lit/no-invalid-escape-sequences": "error",
+    "lit/no-invalid-html": "error",
+    "lit/no-legacy-template-syntax": "error",
+    "lit/no-native-attributes": "error",
+    "lit/no-private-properties": "error",
+    "lit/no-property-change-update": "error",
+    "lit/no-template-bind": "error",
+    "lit/no-useless-template-literals": "error",
+    "lit/no-value-attribute": "error",
+    "wc/no-constructor-attributes": "error",
+    "wc/no-invalid-element-name": "error",
+    "wc/no-self-class": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.ts", "test/**/*.ts"],
+      "rules": {
+        "no-array-constructor": "error",
+        "no-unused-expressions": "error",
+        "typescript/ban-ts-comment": "error",
+        "typescript/no-duplicate-enum-values": "error",
+        "typescript/no-empty-object-type": "error",
+        // A warning for now: there are still around 200 of these to replace with real types.
+        "typescript/no-explicit-any": "warn",
+        "typescript/no-extra-non-null-assertion": "error",
+        "typescript/no-misused-new": "error",
+        "typescript/no-namespace": "error",
+        "typescript/no-non-null-asserted-optional-chain": "error",
+        "typescript/no-require-imports": "error",
+        "typescript/no-this-alias": "error",
+        "typescript/no-unnecessary-type-constraint": "error",
+        "typescript/no-unsafe-declaration-merging": "error",
+        "typescript/no-unsafe-function-type": "error",
+        "typescript/no-wrapper-object-types": "error",
+        "typescript/prefer-as-const": "error",
+        "typescript/prefer-namespace-keyword": "error",
+        "typescript/triple-slash-reference": "error",
+        "no-unused-vars": [
+          "error",
+          {
+            "argsIgnorePattern": "^_",
+            "varsIgnorePattern": "^_",
+            "caughtErrorsIgnorePattern": "^_",
+            "destructuredArrayIgnorePattern": "^_",
+            "ignoreRestSiblings": true
+          }
+        ],
+        "no-var": "error",
+        "prefer-const": "error",
+        "eqeqeq": "error"
+      }
+    },
+    {
+      "files": ["test/**", "demo/**"],
+      "rules": {
+        // Chai assertions such as `expect(value).to.be.true` are expressions on their own.
+        "no-unused-expressions": "off",
+        "lit/no-private-properties": "off",
+        "lit/no-template-bind": "off",
+        "lit/no-useless-template-literals": "off"
+      }
+    },
+    {
+      // Config files and scripts run in Node, and so do the scripts' tests.
+      "files": ["*.config.{js,mjs}", "scripts/**/*.js", "test/scripts/**/*.js"],
+      "env": {
+        "node": true
+      }
+    }
+  ]
+}
