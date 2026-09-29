@@ -25,6 +25,10 @@ The package includes a [Custom Elements Manifest](https://custom-elements-manife
 
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
+crag needs a Buttress built from its `develop` branch at `3f044191` or later, published as
+`dpcltd/buttress:sha-3f04419`. It relies on Buttress answering a bulk update for each update in it, and on
+`auth.token` for the realtime socket. No tagged Buttress release has these yet.
+
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
 Node 24 or newer; see [Development](#development).
 
@@ -427,9 +431,9 @@ After building, `scripts/e2e.js` starts Buttress, MongoDB and Redis in container
 policies, users and organisations (`scripts/e2e-seed.js`). It then runs the tests in Chrome and removes the containers.
 Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first.
 
-The first run downloads the images. Later runs check for a newer `dpcltd/buttress:develop` and fall back to the copy
-you have when Docker Hub can't be reached. To test against a different image, such as one built from a Buttress
-checkout, set `BUTTRESS_IMAGE`:
+The first run downloads the images. The Buttress image is pinned in `.docker/docker-compose.e2e.yml` to the oldest
+build crag supports, so a run doesn't change as Buttress moves on; move it on deliberately. To test against a
+different image, such as one built from a Buttress checkout, set `BUTTRESS_IMAGE`:
 
 ```bash
 docker build -t buttress:local path/to/buttress-js
