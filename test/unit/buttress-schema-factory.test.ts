@@ -124,6 +124,11 @@ describe('ButtressSchemaFactory.create without a schema', () => {
 
 describe('ButtressSchemaFactory.getPropDefault', () => {
   const defaultOf = (config: object) => ButtressSchemaFactory.getPropDefault(config as ButtressSchemaProperty);
+  const dated = (__default: string): ButtressSchema => ({
+    name: 'organisation',
+    type: 'collection',
+    properties: { createdAt: { __type: 'date', __default } as ButtressSchemaProperty },
+  });
 
   it('uses the __default when there is one', () => {
     expect(defaultOf({ __type: 'boolean', __default: true })).to.equal(true);
@@ -141,6 +146,27 @@ describe('ButtressSchemaFactory.getPropDefault', () => {
     expect(defaultOf({ __type: 'object' })).to.deep.equal({});
     expect(defaultOf({ __type: 'id' })).to.equal(null);
     expect(defaultOf({ __type: 'other' })).to.equal(false);
+  });
+
+  // Buttress reads a date's __default with Sugar, which crag doesn't have: 'now' is the default Buttress's own
+  // timestamps use.
+  it("gives a date whose __default is 'now' the current time", () => {
+    const now = defaultOf({ __type: 'date', __default: 'now' }) as Date;
+
+    expect(now).to.be.instanceOf(Date);
+    expect(Math.abs(now.getTime() - Date.now())).to.be.below(1000);
+  });
+
+  it('leaves a date whose __default it cannot read for Buttress to fill in', () => {
+    expect(defaultOf({ __type: 'date', __default: 'next tuesday' })).to.equal(undefined);
+    // Left out of what's sent, so Buttress uses the __default rather than storing null.
+    expect(JSON.stringify(ButtressSchemaHelpers.inflate(dated('next tuesday'), false))).to.equal('{}');
+  });
+
+  it("sends a date whose __default is 'now' as the time it was made", () => {
+    const sent = JSON.parse(JSON.stringify(ButtressSchemaHelpers.inflate(dated('now'), false)));
+
+    expect(Math.abs(new Date(sent.createdAt).getTime() - Date.now())).to.be.below(1000);
   });
 
   it('gives a date the __default date, null, or now', () => {

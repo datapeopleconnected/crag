@@ -159,7 +159,7 @@ any time.
 
 | Method                                        | Description                                                                                                                                         |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. |
+| `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. A date whose default is `'now'` gets the current time; one crag can't read, such as `'today'`, is left out for Buttress to fill in. |
 | `create(schema, entity, opts?)`               | Adds the entity to the store and to Buttress, generating an `id` if it has none. Returns its path, e.g. `organisation.6709476b082b32233234259c`. |
 | `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
@@ -331,7 +331,7 @@ passes through arrays can give several values, and an entity matches if any of t
 | `$in`                                        | is in the operand array                                                     |
 | `$nin`                                       | is not in the operand array. Every value must pass this one.               |
 | `$rex`, `$rexi`                              | matches the regular expression. `$rexi` ignores case.                      |
-| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. `null` never matches. |
+| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. Dates are compared as times, whether they're `Date`s or the ISO strings they arrive from Buttress as. A missing or `null` date never matches, and nor does anything for a `null` operand. |
 | `$exists`                                    | is present, even if `null`, when the operand is `true`; is missing when it's `false`. |
 | `$elMatch`                                   | is an array with an element that matches the sub-query                     |
 | `$inProp`                                    | contains the operand. Top-level properties only.                           |

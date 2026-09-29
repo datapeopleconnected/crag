@@ -1197,6 +1197,100 @@ describe('ButtressDataService local sort', () => {
   });
 });
 
+// Entities arrive from Buttress as JSON, so their dates are ISO strings.
+describe('ButtressDataService date operators on data from Buttress', () => {
+  type Dated = { id: string; founded?: string | null };
+
+  let originalFetch: typeof window.fetch;
+
+  const server: Dated[] = [
+    { id: 'old', founded: '2000-01-01T00:00:00.000Z' },
+    { id: 'mid', founded: '2005-06-15T12:00:00.000Z' },
+    { id: 'new', founded: '2010-01-01T00:00:00.000Z' },
+    { id: 'none' },
+    { id: 'null', founded: null },
+  ];
+  const operand = '2005-06-15T12:00:00.000Z';
+  // As Buttress compares them: as dates, never matching a missing or null one.
+  const compare: Record<string, (a: number, b: number) => boolean> = {
+    $gtDate: (a, b) => a > b,
+    $gteDate: (a, b) => a >= b,
+    $ltDate: (a, b) => a < b,
+    $lteDate: (a, b) => a <= b,
+  };
+  const matches = (entity: Dated, query: { founded?: Record<string, string> }) =>
+    Object.entries(query.founded ?? {}).every(
+      ([operator, date]) =>
+        typeof entity.founded === 'string' &&
+        compare[operator](new Date(entity.founded).getTime(), new Date(date).getTime()),
+    );
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    Logger.disableLogging = true;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string);
+      const found = server.filter((entity) => matches(entity, body.query));
+      if (new URL(input.toString()).pathname.endsWith('/count')) return new Response(JSON.stringify(found.length));
+      return new Response(JSON.stringify(found.slice(body.skip, body.limit ? body.skip + body.limit : undefined)));
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    Logger.disableLogging = false;
+  });
+
+  const dataService = () =>
+    new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc' },
+      new ButtressStore(),
+      schema,
+    );
+  const ids = (results: ButtressEntity[]) => results.map((r) => r.id);
+
+  const expected: Record<string, string[]> = {
+    $gtDate: ['new'],
+    $gteDate: ['mid', 'new'],
+    $ltDate: ['old'],
+    $lteDate: ['old', 'mid'],
+  };
+
+  for (const [operator, matching] of Object.entries(expected)) {
+    it(`matches ${operator}`, async () => {
+      const { results, total } = await dataService().query({ founded: { [operator]: operand } });
+
+      expect(ids(results)).to.deep.equal(matching);
+      expect(total).to.equal(matching.length);
+    });
+
+    it(`matches ${operator} for a page`, async () => {
+      const { results } = await dataService().query({ founded: { [operator]: operand } }, { limit: 10 });
+
+      expect(ids(results)).to.deep.equal(matching);
+    });
+
+    it(`skips entities without the date, or with a null one, for ${operator}`, async () => {
+      const ds = dataService();
+      await ds.query({});
+
+      const { results } = await ds.query({ founded: { [operator]: operand } });
+
+      expect(ids(results)).to.deep.equal(matching);
+    });
+  }
+
+  it('matches a range', async () => {
+    const { results } = await dataService().query({
+      founded: { $gteDate: '2000-01-01T00:00:00.000Z', $ltDate: '2010-01-01T00:00:00.000Z' },
+    });
+
+    expect(ids(results)).to.deep.equal(['old', 'mid']);
+  });
+});
+
 describe('ButtressDataService query operators', () => {
   const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
   const data = [

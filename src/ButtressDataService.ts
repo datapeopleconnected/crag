@@ -21,7 +21,7 @@ import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, buildSettings, Dasherize, DateCreate, DateIsBefore, DateIsAfter, DateIsEqual } from './helpers.js';
+import { Settings, buildSettings, Dasherize, DateTime } from './helpers.js';
 
 export interface QueryResult {
   skip?: number;
@@ -440,7 +440,14 @@ export default class ButtressDataService implements ButtressStoreInterface {
   };
 
   _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    // Each operator takes its operand and returns the filter for it. A date operator with a null operand matches nothing.
+    // A date operator compares times. DateTime gives NaN for a value that isn't a date, such as a missing or null one,
+    // and NaN compares false, so those never match, and an operand that isn't a date matches nothing.
+    const dateOperator = (matches: (time: number, operandTime: number) => boolean) => (rhs: any) => {
+      const operandTime = DateTime(rhs);
+      return (lhs: any) => this.__parsePath(lhs, field).some((val) => matches(DateTime(val), operandTime));
+    };
+
+    // Each operator takes its operand and returns the filter for it.
     const fns: { [key: string]: (rhs: any) => (lhs: any) => boolean } = {
       $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
       $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
@@ -462,46 +469,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
       },
       $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
       $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
-      $gtDate: (rhs: any) => {
-        if (rhs === null) return () => false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsBefore(rhsDate, val);
-          }) !== -1;
-      },
-      $ltDate: (rhs: any) => {
-        if (rhs === null) return () => false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsAfter(rhsDate, val);
-          }) !== -1;
-      },
-      $gteDate: (rhs: any) => {
-        if (rhs === null) return () => false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsBefore(rhsDate, val) || DateIsEqual(rhsDate, val);
-          }) !== -1;
-      },
-      $lteDate: (rhs: any) => {
-        if (rhs === null) return () => false;
-        const rhsDate = DateCreate(rhs);
-
-        return (lhs: any) =>
-          this.__parsePath(lhs, field).findIndex((val) => {
-            if (val === null) return false; // Dont compare against null value
-            return DateIsAfter(rhsDate, val) || DateIsEqual(rhsDate, val);
-          }) !== -1;
-      },
+      $gtDate: dateOperator((time, operandTime) => time > operandTime),
+      $ltDate: dateOperator((time, operandTime) => time < operandTime),
+      $gteDate: dateOperator((time, operandTime) => time >= operandTime),
+      $lteDate: dateOperator((time, operandTime) => time <= operandTime),
     };
 
     if (!fns[operator]) {

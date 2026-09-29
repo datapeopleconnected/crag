@@ -18,8 +18,6 @@ import { ButtressSchema, ButtressSchemaHelpers } from './ButtressSchema.js';
 
 import type { ButtressSchemaProperty } from './types/ButtressSchemaProperty.js';
 
-import { DateCreate } from './helpers.js';
-
 // An ObjectId is 12 bytes: a 4-byte timestamp in seconds, a 5-byte random value that stays the same for the page,
 // and a 3-byte counter that starts at a random value. This is the layout MongoDB and the bson package use.
 const objectIdRandom = crypto.getRandomValues(new Uint8Array(5));
@@ -82,10 +80,13 @@ export class ButtressSchemaFactory {
       case 'date':
         if (config.__default === null) {
           res = null;
-        } else if (config.__default) {
-          res = DateCreate(config.__default);
-        } else {
+        } else if (!config.__default || config.__default === 'now') {
           res = new Date();
+        } else {
+          // Buttress reads a default such as 'today' with Sugar. One crag can't read is left out, so Buttress fills it
+          // in rather than storing the null an Invalid Date is sent as.
+          const date = new Date(config.__default);
+          res = Number.isNaN(date.getTime()) ? undefined : date;
         }
         break;
       default:
