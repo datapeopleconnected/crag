@@ -263,9 +263,7 @@ describe('ButtressDbService', () => {
       );
     });
 
-    // Buttress doesn't send deletes: to work out who may see the change, its socket policy router looks up the
-    // entity, which has gone, and logs "Unable to find document" instead. Unskip once Buttress sends them.
-    it.skip("applies another client's deletes to the store", async function () {
+    it("applies another client's deletes to the store", async function () {
       this.timeout(15000);
       const { watcher, writer } = await clients();
 
