@@ -412,11 +412,12 @@ npm run test:unit
 | `npm run analyze`             | Writes `custom-elements.json` from `src/`. See `custom-elements-manifest.config.mjs`. |
 | `npm run test:unit`           | Runs the unit tests in Chrome. No build or server needed.                      |
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
+| `npm run test:scripts`        | Tests the scripts in `scripts/` in Node, with a fake `docker`. No Docker needed. |
 | `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
 | `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
 | `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
 | `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
-| `npm run check`               | Runs `lint`, `format`, `typecheck` and `test:unit`.                            |
+| `npm run check`               | Runs `lint`, `format`, `typecheck`, `test:coverage` and `test:scripts`.        |
 | `npm run publint`             | Checks the packed package with publint and Are the Types Wrong.                |
 
 ### End-to-end tests
@@ -429,7 +430,9 @@ npm test
 
 After building, `scripts/e2e.js` starts Buttress, MongoDB and Redis in containers, and seeds Buttress with a test app,
 policies, users and organisations (`scripts/e2e-seed.js`). It then runs the tests in Chrome and removes the containers.
-Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first.
+Every run starts from an empty database. If a run fails, the end of the Buttress log is printed first. Each run has
+containers of its own, so runs side by side, from two worktrees say, don't get in each other's way, and a run removes
+the containers of any earlier run that was killed before it could.
 
 The first run downloads the images. The Buttress image is pinned in `.docker/docker-compose.e2e.yml` to the oldest
 build crag supports, so a run doesn't change as Buttress moves on; move it on deliberately. To test against a

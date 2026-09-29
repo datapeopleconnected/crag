@@ -1,5 +1,5 @@
 # A throwaway Buttress for the end-to-end tests. scripts/e2e.js starts it, seeds it and removes it again:
-# see "End-to-end tests" in the README.
+# see "End-to-end tests" in the README. It runs each stack as a project of its own, crag-e2e-<pid>.
 name: crag-e2e
 
 services:

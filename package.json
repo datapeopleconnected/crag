@@ -41,6 +41,7 @@
     "test:e2e": "node ./scripts/e2e.js wtr --node-resolve",
     "test:watch": "npm run test:unit -- --watch",
     "test:coverage": "npm run test:unit -- --coverage",
+    "test:scripts": "node --test \"test/scripts/*.test.js\"",
     "publint": "publint && attw --pack . --profile esm-only",
     "prepack": "npm run build",
     "prepare": "husky",
@@ -49,7 +50,7 @@
     "format": "prettier \"**/*.ts\" --check --ignore-path .gitignore",
     "format:fix": "prettier \"**/*.ts\" --write --ignore-path .gitignore",
     "typecheck": "tsc --noEmit -p . && tsc -p test",
-    "check": "npm run lint && npm run format && npm run typecheck && npm run test:coverage"
+    "check": "npm run lint && npm run format && npm run typecheck && npm run test:coverage && npm run test:scripts"
   },
   "files": [
     "dist",

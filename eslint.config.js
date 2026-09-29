@@ -57,8 +57,8 @@ export default defineConfig([
     },
   },
   {
-    // Config files and scripts run in Node.
-    files: ['*.config.{js,mjs}', 'scripts/**/*.js'],
+    // Config files and scripts run in Node, and so do the scripts' tests.
+    files: ['*.config.{js,mjs}', 'scripts/**/*.js', 'test/scripts/**/*.js'],
     languageOptions: {
       globals: globals.node,
     },
