@@ -934,7 +934,7 @@ describe('ButtressDataService writes', () => {
     ]);
   });
 
-  it('sends a set of an entity already in the store as updates to the properties that changed', async () => {
+  it('sends a set of an entity already in the store as updates to the values that changed', async () => {
     const ds = withEntity();
     const entity = ds.get('organisation.x');
 
@@ -943,7 +943,7 @@ describe('ButtressDataService writes', () => {
 
     expect(sent).to.deep.equal([
       { method: 'PUT', path: '/x', body: { path: 'name', value: 'b' } },
-      { method: 'PUT', path: '/x', body: { path: 'address', value: { city: 'York' } } },
+      { method: 'PUT', path: '/x', body: { path: 'address.city', value: 'York' } },
     ]);
   });
 
@@ -1249,6 +1249,92 @@ describe('ButtressDataService writes', () => {
 
     expect(ds.get('organisation.y.contacts.0.phones')).to.deep.equal(['0113']);
     expect(sent).to.deep.equal([{ method: 'PUT', path: '/y', body: { path: 'contacts.0.phones', value: '0113' } }]);
+  });
+
+  // A set sends what differs from Buttress's copy, which pushes and splices change as they change the store's.
+  describe('after a push or splice', () => {
+    // Buttress's copy of x is taken when it's loaded, as here from a realtime post.
+    const loaded = () => {
+      const ds = new ButtressDataService(
+        'organisation',
+        false,
+        { endpoint: 'https://example.test', token: 'abc' },
+        new ButtressStore(),
+        writeSchema,
+      );
+      ds.create({ id: 'x', name: 'a', tags: ['a', 'b'] }, { localOnly: true });
+      return ds;
+    };
+
+    it('still sends an item added to the array in place', async () => {
+      const ds = loaded();
+      const tags = ds.get('organisation.x.tags');
+
+      tags.push('in place');
+      ds.push('organisation.x.tags', 'pushed');
+      ds.set('organisation.x.tags', tags);
+      await settle(ds);
+
+      expect(sent.map((r) => r.body)).to.deep.equal([
+        { path: 'tags', value: 'pushed' },
+        { path: 'tags', value: ['a', 'b', 'in place', 'pushed'] },
+      ]);
+    });
+
+    it('does not send the array again', async () => {
+      const ds = loaded();
+
+      ds.push('organisation.x.tags', 'c');
+      ds.splice('organisation.x.tags', 0, 1);
+      ds.splice('organisation.x.tags', 1, 0, 'm');
+      ds.splice('organisation.x.tags', 3, 0, 'z');
+      await settle(ds);
+      const count = sent.length;
+      ds.set('organisation.x', ds.get('organisation.x'));
+      await settle(ds);
+
+      expect(ds.get('organisation.x.tags')).to.deep.equal(['b', 'm', 'c', 'z']);
+      expect(sent.length).to.equal(count);
+    });
+
+    it('sends the whole array again after Buttress refused a remove from it', async () => {
+      const ds = loaded();
+      const originalError = console.error;
+      console.error = () => {};
+      status = 400;
+      ds.splice('organisation.x.tags', 0, 1);
+      await settle(ds);
+      console.error = originalError;
+
+      status = 200;
+      ds.set('organisation.x', ds.get('organisation.x'));
+      await settle(ds);
+
+      expect(sent.map((r) => r.body)).to.deep.equal([
+        { path: 'tags.0.__remove__', value: '' },
+        { path: 'tags', value: ['b'] },
+      ]);
+    });
+  });
+
+  it('takes an entity from a collection set in place of the old one as it is', async () => {
+    const ds = withEntity();
+
+    ds.set('organisation', new Map([['x', { id: 'x', name: 'z' }]]));
+    ds.set('organisation.x', { id: 'x', name: 'z' });
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
+  });
+
+  it('throws for a push or splice into an entity that is not in the store, and sends nothing', async () => {
+    const ds = withEntity();
+
+    expect(() => ds.push('organisation.missing.tags', 'a')).to.throw(/not in the store/);
+    expect(() => ds.splice('organisation.missing.tags', 0, 0, 'a')).to.throw(/not in the store/);
+    await settle(ds);
+
+    expect(sent).to.deep.equal([]);
   });
 
   it('passes notifyPath to the store, which reports whether the value changed', () => {

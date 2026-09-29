@@ -161,7 +161,7 @@ any time.
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createObject(path)`                          | A new entity filled in with the schema's defaults and a new `id`. Pass a nested path such as `organisation.address` for a sub-object, without an `id`. Nothing is stored. A date whose default is `'now'` gets the current time; one crag can't read, such as `'today'`, is left out for Buttress to fill in. |
 | `create(schema, entity, opts?)`               | Adds the entity to the store and to Buttress, generating an `id` if it has none. Returns its path, e.g. `organisation.6709476b082b32233234259c`. |
-| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store, and otherwise sends the top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing. |
+| `set(path, value, opts?)`                     | Sets a value in the store and on Buttress. Returns the path. Setting a whole entity, `set('organisation.<id>', entity)`, adds it if it isn't in the store. Otherwise crag sends each value that differs from what Buttress has, by its full path (`address.city`). Arrays are sent whole, and a property the new value leaves out, or sets to `undefined`, is set to `null`. The entity's `id` must match the path's, and is filled in if it's missing. |
 | `push(path, ...items)`                        | Appends to an array property, creating the array if the schema says the property is one. Returns the new length.                                   |
 | `splice(path, start, deleteCount?, ...items)` | Splices an array property. Returns the removed items.                                                                                               |
 | `pushWith(path, opts, ...items)`              | `push` with options. The options come before the items, since an item can be an object too.                                                        |
@@ -171,6 +171,9 @@ any time.
 
 Before you write:
 
+- `get()`, `query()` results and `getById()` give you the store's own objects, not copies. You can change one in
+  place and then `set()` it, or a copy of it: crag compares it with what Buttress has, so it sends the changes and tells
+  subscribers. A change made in place and never `set()` isn't sent, and subscribers don't hear of it.
 - `set`, `push` and `splice` only work inside entities that are already in the store: queried, fetched or created.
   Inside one, `set` creates any object missing on the way to its path, as Buttress does, and throws if one on the
   way is `null` or isn't an object.

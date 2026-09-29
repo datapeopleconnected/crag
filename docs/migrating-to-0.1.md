@@ -281,8 +281,10 @@ realtime updates whose `data.clientSessionId` matches.
 - **`set`, `create` and `delete` send their own requests.** They used to be worked out from the store's change
   notifications a moment later, which went wrong in several ways that are now fixed:
   - a `set` and then a `delete` of the same entity in one go threw an error, and the delete wasn't sent;
-  - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends the
-    top-level properties that changed. The entity's `id` must match the path's, and is filled in if it's missing;
+  - `set('organisation.<id>', entity)` for an entity already in the store sent it as a new entity. It now sends each
+    value that differs from what Buttress has, by its full path, and `null` for a property the entity leaves out, so
+    a set replaces the entity. That includes changes made in place to the entity `get()` or a query gave you. The
+    entity's `id` must match the path's, and is filled in if it's missing;
   - a `set` inside an entity that isn't in the store notified subscribers of a change that never happened, and threw
     an error that could stop other subscribers hearing about other changes. It now does nothing. Inside an entity
     that is in the store, a `set` creates any object missing on the way to its path and sends the set, and throws if

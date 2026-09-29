@@ -722,6 +722,187 @@ describe('ButtressDbService wait', () => {
   });
 });
 
+// get(), query results and getById() hand out the store's own objects, which an app can change in place. So a set works
+// out what to send from what Buttress has, not from the object in the store.
+describe('ButtressDbService set of an entity from the store', () => {
+  type Sent = { method: string; path: string; body: unknown };
+  type BulkUpdate = { id: string; body: unknown }[];
+
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+  let sent: Sent[];
+  let status: number;
+
+  const schemas = [
+    {
+      name: 'organisation',
+      type: 'collection',
+      properties: {
+        name: { __type: 'string' },
+        status: { __type: 'string' },
+        tags: { __type: 'array' },
+        address: { city: { __type: 'string' }, street: { __type: 'string' } },
+      },
+    },
+  ];
+  const stored = { id: 'x', name: 'a', status: 'new', tags: ['a', 'b'], address: { city: 'Leeds', street: 'High St' } };
+  const path = 'organisation.x';
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    sent = [];
+    status = 200;
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const route = new URL(input.toString()).pathname.replace('/api/v1/', '');
+      if (route === 'app/schema') return new Response(JSON.stringify(schemas));
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      sent.push({ method: init!.method!, path: route, body });
+      if (route.endsWith('/count')) return new Response('1');
+      if (init?.method === 'SEARCH') return new Response(JSON.stringify([stored]));
+      if (route.endsWith('/bulk/update')) {
+        return new Response(JSON.stringify((body as BulkUpdate).map((u) => ({ id: u.id, results: [u.body] }))));
+      }
+      return new Response(status === 200 ? '{}' : '{"message":"nope"}', { status });
+    };
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  // A connected element with organisation x loaded by a query.
+  const loaded = async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service endpoint="https://example.test" token="abc" api-path="app" log-disable></buttress-db-service>
+    `);
+    (el as any)._realtime.connect = () => {};
+    await el.connect();
+    const { results } = await el.query('organisation', {});
+    sent = [];
+    return { el, entity: results[0] };
+  };
+
+  // The { path, value } of each update sent, bundled or not.
+  const updates = () =>
+    sent.flatMap((r) => {
+      if (r.method === 'PUT') return [r.body];
+      if (r.path.endsWith('/bulk/update')) return (r.body as BulkUpdate).map((u) => u.body);
+      return [];
+    });
+
+  it('sends a nested edit made to a copy of the entity', async () => {
+    const { el } = await loaded();
+
+    const copy = { ...el.get(path)! };
+    copy.address.city = 'York';
+    await el.set(path, copy, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'address.city', value: 'York' }]);
+  });
+
+  it('sends an edit made to the entity in place, and notifies subscribers', async () => {
+    const { el, entity } = await loaded();
+    const names: unknown[] = [];
+    el.subscribe(`${path}.name`, (cr: { value: unknown }) => names.push(cr.value));
+
+    entity.name = 'b';
+    await el.set(path, entity, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'name', value: 'b' }]);
+    expect(names).to.deep.equal(['b']);
+  });
+
+  it('sends an edit made to an array in place, and notifies subscribers', async () => {
+    const { el, entity } = await loaded();
+    const lengths: unknown[] = [];
+    el.subscribe(`${path}.tags`, (cr: { value: unknown[] }) => lengths.push(cr.value.length));
+
+    entity.tags.push('c');
+    await el.set(`${path}.tags`, entity.tags, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'tags', value: ['a', 'b', 'c'] }]);
+    expect(lengths).to.deep.equal([3]);
+  });
+
+  it('sets the properties a whole-entity set leaves out to null', async () => {
+    const { el } = await loaded();
+
+    await el.set(path, { id: 'x', name: 'b', tags: ['a', 'b'] }, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'name', value: 'b' },
+      { path: 'status', value: null },
+      { path: 'address', value: null },
+    ]);
+  });
+
+  it('sets the properties a nested object set leaves out to null', async () => {
+    const { el } = await loaded();
+
+    await el.set(`${path}.address`, { city: 'York' }, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'address.city', value: 'York' },
+      { path: 'address.street', value: null },
+    ]);
+  });
+
+  it('sets a property set to undefined to null', async () => {
+    const { el, entity } = await loaded();
+
+    await el.set(path, { ...entity, status: undefined }, { wait: true });
+    await el.set(`${path}.name`, undefined, { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'status', value: null },
+      { path: 'name', value: null },
+    ]);
+  });
+
+  it('does not send again what a realtime update brought', async () => {
+    const { el } = await loaded();
+    (el as any)._realtime._parsePayload({
+      schemaName: 'organisation',
+      verb: 'put',
+      path: 'organisation/x',
+      pathSpec: 'organisation/:id',
+      response: { type: 'scalar', path: 'name', value: 'from elsewhere' },
+    });
+
+    await el.set(path, { ...el.get(path)!, status: 'done' }, { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'status', value: 'done' }]);
+  });
+
+  it('sends a value again after Buttress refused it', async () => {
+    const { el } = await loaded();
+    console.error = () => {};
+    status = 400;
+    await el.set(`${path}.name`, 'b', { wait: true }).catch(() => {});
+
+    status = 200;
+    await el.set(`${path}.name`, 'b', { wait: true });
+
+    expect(updates()).to.deep.equal([
+      { path: 'name', value: 'b' },
+      { path: 'name', value: 'b' },
+    ]);
+  });
+
+  it('does not send again what it has already sent', async () => {
+    const { el, entity } = await loaded();
+
+    entity.name = 'b';
+    await el.set(path, entity, { wait: true });
+    await el.set(path, entity, { wait: true });
+    await el.set(`${path}.name`, 'b', { wait: true });
+
+    expect(updates()).to.deep.equal([{ path: 'name', value: 'b' }]);
+  });
+});
+
 describe('ButtressDbService API', () => {
   let originalFetch: typeof window.fetch;
   let sent: { method: string; path: string; apiPath: string | null; body: unknown }[];
@@ -953,7 +1134,7 @@ describe('ButtressDbService API', () => {
     });
   });
 
-  it('notifies subscribers, but sends nothing, for a set of an entity changed in place', async () => {
+  it('notifies subscribers, and sends the change, for a set of an entity changed in place', async () => {
     const el = await connected();
     const entity = el.get('organisation.x')!;
     const values: unknown[] = [];
@@ -964,7 +1145,9 @@ describe('ButtressDbService API', () => {
     await el.nextIdle('organisation');
 
     expect(values).to.deep.equal(['b']);
-    expect(sent).to.deep.equal([]);
+    expect(sent.map(({ method, body }) => ({ method, body }))).to.deep.equal([
+      { method: 'PUT', body: { path: 'name', value: 'b' } },
+    ]);
   });
 
   it('creates a blank object from a schema', async () => {
