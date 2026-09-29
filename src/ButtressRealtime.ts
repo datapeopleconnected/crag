@@ -38,7 +38,8 @@ export default class ButtressDataRealtime {
 
   private _dispatchCustomEvent: (type: string, init: CustomEventInit) => void;
 
-  private _loadById: (detail: EventDataDataServiceLoadById) => void;
+  // May return a promise, which nothing waits for: a failure is logged.
+  private _loadById: (detail: EventDataDataServiceLoadById) => unknown;
 
   private _isConnected: boolean = false;
 
@@ -51,7 +52,7 @@ export default class ButtressDataRealtime {
     store: customButtressStoreInterface,
     settings: Settings,
     dispatchCustomEvent: (type: string, init: CustomEventInit) => void,
-    loadById: (detail: EventDataDataServiceLoadById) => void,
+    loadById: (detail: EventDataDataServiceLoadById) => unknown,
   ) {
     this._store = store;
     this._settings = settings;
@@ -223,13 +224,22 @@ export default class ButtressDataRealtime {
     this._logger.debug(`_handlePut: start`);
     const responses: Array<any> = Array.isArray(response) ? response : [response];
 
+    // Each result is applied on its own, so one that fails doesn't stop the rest.
+    const apply = (id: string, res: unknown) => {
+      try {
+        this._update(schemaName, pathParts, id, res);
+      } catch (err) {
+        this._logger.error(`Unable to apply an update to ${schemaName} ${id}:`, err);
+      }
+    };
+
     for (let x = 0; x < responses.length; x += 1) {
       const isBulk = responses[x].id && responses[x].results;
 
       if (isBulk) {
-        responses[x].results.forEach((res: any) => this._update(schemaName, pathParts, responses[x].id, res));
+        responses[x].results.forEach((res: any) => apply(responses[x].id, res));
       } else {
-        this._update(schemaName, pathParts, pathParts.id, responses[x]);
+        apply(pathParts.id, responses[x]);
       }
     }
   }
@@ -290,7 +300,7 @@ export default class ButtressDataRealtime {
     }
   }
 
-  private async _update(schemaName: string, pathParts: PathParts, id: string, response: any) {
+  private _update(schemaName: string, pathParts: PathParts, id: string, response: any) {
     const updatePath = this._getUpdatePath(schemaName, id, response.path);
     this._logger.debug(`_update`, updatePath);
     if (updatePath === false) {
@@ -300,7 +310,9 @@ export default class ButtressDataRealtime {
         bubbles: true,
         composed: true,
       });
-      this._loadById(detail);
+      Promise.resolve(this._loadById(detail)).catch((err) =>
+        this._logger.error(`Unable to load ${schemaName} ${id} after an update to it:`, err),
+      );
       return;
     }
 

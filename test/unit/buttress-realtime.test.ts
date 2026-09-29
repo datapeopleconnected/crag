@@ -325,7 +325,8 @@ describe('ButtressRealtime', () => {
       console.warn = originalWarn;
     });
 
-    const setup = () => {
+    // `overrides` replaces the store's set, or the element's loadById.
+    const setup = (overrides: { set?: (...args: unknown[]) => unknown; loadById?: () => unknown } = {}) => {
       const calls: unknown[][] = [];
       const loaded: unknown[] = [];
       const events: string[] = [];
@@ -337,7 +338,7 @@ describe('ButtressRealtime', () => {
       const store = {
         localName: (name: string) => name,
         get: (path: string) => data[path],
-        set: (...args: unknown[]) => calls.push(['set', ...args]),
+        set: overrides.set ?? ((...args: unknown[]) => calls.push(['set', ...args])),
         create: (...args: unknown[]) => calls.push(['create', ...args]),
         delete: (...args: unknown[]) => calls.push(['delete', ...args]),
         pushExt: (...args: unknown[]) => calls.push(['pushExt', ...args]),
@@ -347,7 +348,7 @@ describe('ButtressRealtime', () => {
         store as any,
         buildSettings({}),
         (type: string) => events.push(type),
-        (detail: unknown) => loaded.push(detail),
+        overrides.loadById ?? ((detail: unknown) => loaded.push(detail)),
       );
       const receive = (verb: string, path: string, response: unknown, extra: object = {}) =>
         (realtime as any)._parsePayload({
@@ -463,6 +464,64 @@ describe('ButtressRealtime', () => {
       expect(calls).to.deep.equal([]);
       expect(loaded).to.deep.equal([{ schemaName: 'organisation', id: 'y' }]);
       expect(events).to.deep.equal(['dataservice:loadById']);
+    });
+
+    // Nothing waits for these, so a failure must be logged rather than left as an unhandled rejection.
+    describe('when applying an update fails', () => {
+      let uncaught: unknown[];
+      let logged: unknown[];
+      let originalError: typeof console.error;
+      const onRejection = (event: PromiseRejectionEvent) => {
+        uncaught.push(event.reason);
+      };
+      // Long enough for the browser to report an unhandled rejection.
+      const settled = () =>
+        new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+
+      beforeEach(() => {
+        uncaught = [];
+        logged = [];
+        window.addEventListener('unhandledrejection', onRejection);
+        originalError = console.error;
+        console.error = (...args: unknown[]) => logged.push(args);
+      });
+
+      afterEach(() => {
+        window.removeEventListener('unhandledrejection', onRejection);
+        console.error = originalError;
+      });
+
+      it('logs a failed load of the entity an update arrived for', async () => {
+        const { receive } = setup({ loadById: () => Promise.reject(new Error('not found')) });
+
+        receive('put', 'organisation/y', { type: 'scalar', path: 'name', value: 'b' });
+        await settled();
+
+        expect(uncaught).to.deep.equal([]);
+        expect(JSON.stringify(logged)).to.contain('organisation y');
+      });
+
+      it('logs a result that fails, and applies the others', async () => {
+        const applied: unknown[] = [];
+        const { receive } = setup({
+          set: (path: unknown) => {
+            if (path === 'organisation.x.name') throw new Error('cannot set');
+            applied.push(path);
+          },
+        });
+
+        receive('put', 'organisation/x', [
+          { type: 'scalar', path: 'name', value: 'b' },
+          { type: 'scalar', path: 'status', value: 'c' },
+        ]);
+        await settled();
+
+        expect(applied).to.deep.equal(['organisation.x.status']);
+        expect(uncaught).to.deep.equal([]);
+        expect(logged).to.have.length(1);
+      });
     });
 
     it('loads the entity when an update arrives before its collection is in the store', () => {
