@@ -198,6 +198,49 @@ describe('ButtressDataService request queue', () => {
   });
 });
 
+describe('ButtressDataService request timeout', () => {
+  let originalFetch: typeof window.fetch;
+  let originalError: typeof console.error;
+
+  beforeEach(() => {
+    originalFetch = window.fetch;
+    originalError = console.error;
+    // The queue logs the request that timed out.
+    console.error = () => {};
+  });
+
+  afterEach(() => {
+    window.fetch = originalFetch;
+    console.error = originalError;
+  });
+
+  it('sends the requests queued behind one that never answers once it times out', async () => {
+    const sent: string[] = [];
+    // The first request never gets a response, and fails when its signal aborts, as fetch does.
+    window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(`${init?.method} ${new URL(input.toString()).pathname}`);
+      if (sent.length > 1) return Promise.resolve(new Response('{}'));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    };
+    const ds = new ButtressDataService(
+      'organisation',
+      false,
+      { endpoint: 'https://example.test', token: 'abc', requestTimeout: 20 },
+      new ButtressStore(),
+      schema,
+    );
+
+    const hung = ds.getById('hung');
+    const created = createAndTrack(ds, 'next');
+
+    expect(await outcomeOf(hung)).to.equal('rejected');
+    expect(await outcomeOf(created)).to.equal('resolved');
+    expect(sent).to.deep.equal(['GET /api/v1/organisation/hung', 'POST /api/v1/organisation/']);
+  });
+});
+
 // A request's body is made from the store's objects, which can change before the request is sent.
 describe('ButtressDataService queued request bodies', () => {
   type Sent = { method: string; path: string; body?: unknown };

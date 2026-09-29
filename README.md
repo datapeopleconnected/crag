@@ -122,6 +122,7 @@ there's more than one `<buttress-db-service>` above a component, the nearest one
 | `api-path`    | `apiPath`    | Your app's API path on the server. Required.                                                                                                                |
 | `userid`      | `userId`     | Id of the signed-in user, returned by `getUserId()`. crag doesn't use it itself. |
 | `core-schema` | `coreSchema` | JSON array of Buttress core schemas to load as well as your app's own. Locally, core schema names are singular: `users` becomes `user`, and `activities` becomes `activity`. |
+| `request-timeout` | `requestTimeout` | How long a request to Buttress may take, in milliseconds, before it fails. Defaults to 60000 (a minute); `0` means no limit. A request that times out is rejected like one that fails on the network, and the requests queued behind it are then sent. |
 | `loglevel`    | `logLevel`   | `error`, `warn`, `info` (the default), `debug` or `sys`. Applies to the element, the store, the data services and the realtime connection.                  |
 | `log-label`   |              | Label for the element's own log lines. Defaults to the tag name.                                                                                           |
 | `log-disable` |              | Turns off the element's own log lines. Errors are still printed.                                                                                           |
@@ -251,7 +252,8 @@ use them. Each one rejects with a [`ButtressError`](#errors) if Buttress respond
 When Buttress responds with an error status, crag rejects with a `ButtressError`. That covers `connect()`,
 `awaitConnection()`, queries, `getById()`, `count()` and the app administration methods. Writes report it through
 `dboComplete.reject`. A request that gets no response at all, for example because the network is down, rejects with
-the browser's own error instead.
+the browser's own error instead. So does one that takes longer than `request-timeout`: fetch rejects it with a
+`DOMException` named `TimeoutError`.
 
 ```ts
 import { ButtressError } from '@buttress/crag';

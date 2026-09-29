@@ -121,6 +121,7 @@ describe('ButtressDbService settings', () => {
     el.token = 'abc';
     el.userId = 'user-1';
     el.coreSchema = ['app'];
+    el.requestTimeout = 5000;
 
     // updateComplete resolves false if another update was requested during this one.
     expect(await el.updateComplete).to.equal(true);
@@ -128,6 +129,15 @@ describe('ButtressDbService settings', () => {
     expect(el.getToken()).to.equal('abc');
     expect(el.getUserId()).to.equal('user-1');
     expect(el.getCoreSchemas()).to.deep.equal(['app']);
+    expect((el as any)._settings.requestTimeout).to.equal(5000);
+  });
+
+  it('reads the request timeout, in milliseconds, from request-timeout', async () => {
+    const el = await fixture<ButtressDbService>(html`
+      <buttress-db-service request-timeout="5000"></buttress-db-service>
+    `);
+
+    expect((el as any)._settings.requestTimeout).to.equal(5000);
   });
 });
 

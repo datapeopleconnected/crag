@@ -99,6 +99,10 @@ export class ButtressDbService extends LitElement {
   @property({ type: Array, attribute: 'core-schema' })
   coreSchema?: Array<string>;
 
+  /** Milliseconds a request to Buttress may take before it fails. Defaults to a minute; 0 means no limit. */
+  @property({ type: Number, attribute: 'request-timeout' })
+  requestTimeout?: number;
+
   @property({ type: String, attribute: 'loglevel' })
   logLevel: string = 'info';
 
@@ -184,6 +188,7 @@ export class ButtressDbService extends LitElement {
     this._settings.apiPath = this.apiPath ?? this._settings.apiPath;
     this._settings.userId = this.userId ?? this._settings.userId;
     this._settings.coreSchema = this.coreSchema ?? this._settings.coreSchema ?? [];
+    this._settings.requestTimeout = this.requestTimeout ?? this._settings.requestTimeout;
 
     if (this._reopenRealtime) {
       this._reopenRealtime = false;
@@ -538,6 +543,7 @@ export class ButtressDbService extends LitElement {
     if (changedProperties.has('apiPath')) this._settings.apiPath = this.apiPath;
     if (changedProperties.has('userId')) this._settings.userId = this.userId;
     if (changedProperties.has('coreSchema')) this._settings.coreSchema = this.coreSchema;
+    if (changedProperties.has('requestTimeout')) this._settings.requestTimeout = this.requestTimeout;
     // Trigger reconnection?
   }
 

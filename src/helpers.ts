@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { LogLevel } from './Logger.js';
 
 export interface Settings {
-  [index: string]: string | undefined | string[] | LogLevel;
+  [index: string]: string | undefined | string[] | number | LogLevel;
 
   clientSessionId: string;
 
@@ -28,7 +28,12 @@ export interface Settings {
   userId?: string;
   coreSchema?: string[];
   logLevel?: LogLevel;
+  // How long a request to Buttress may take, in milliseconds, before it fails. 0 means no limit.
+  requestTimeout?: number;
 }
+
+// A minute, so a slow search or a big bulk write still gets its response.
+export const DEFAULT_REQUEST_TIMEOUT = 60_000;
 
 export function buildSettings(settings: Partial<Settings>): Settings {
   if (settings.clientSessionId) {
