@@ -147,7 +147,9 @@ export class ButtressDbService extends LitElement {
     // TODO debounce bulk event triggers?
     // Realtime calls this directly rather than through a DOM listener, so a nested
     // <buttress-db-service>'s bubbling 'dataservice:loadById' event isn't handled here too.
-    const loadById = (detail: EventDataDataServiceLoadById) => this.getById(detail.schemaName, detail.id);
+    // The update means Buttress has changed the entity since it was searched for.
+    const loadById = (detail: EventDataDataServiceLoadById) =>
+      this._getById(detail.schemaName, detail.id, { changed: true });
 
     // Route through the dataservices
     // const self = this;
@@ -477,12 +479,20 @@ export class ButtressDbService extends LitElement {
   }
 
   async getById<T extends ButtressEntity>(dataService: string, entityId: string): Promise<T | undefined> {
+    return this._getById<T>(dataService, entityId);
+  }
+
+  private async _getById<T extends ButtressEntity>(
+    dataService: string,
+    entityId: string,
+    opts?: { changed?: boolean },
+  ): Promise<T | undefined> {
     if (!entityId) throw new Error('Unable to get property without an id');
 
     const ds = this._dataServices[dataService];
     if (!ds) throw new Error("Unable to subscribe to path, data service doesn't exist");
 
-    return (await ds.getById(entityId)) as T;
+    return (await ds.getById(entityId, opts)) as T;
   }
 
   async query(dataService: string, buttressQuery: any, opts?: QueryOpts) {

@@ -322,16 +322,24 @@ describe('ButtressDataService query', () => {
   let server: Org[];
   let searches: number;
   let holdSearches: Promise<void> | undefined;
+  // The properties a policy hides from the token, by entity id. Buttress still matches on them.
+  let hidden: Map<string, string[]>;
 
-  // Pretends to be Buttress: answers searches (with $eq, sort, skip and limit) and counts from `server`.
-  const matches = (org: Org, query: Record<string, { $eq: string }>) =>
-    Object.entries(query).every(([field, { $eq }]) => (org as any)[field] === $eq);
+  // Pretends to be Buttress: answers searches (with $eq, $ne, sort, skip and limit), counts and GETs from `server`.
+  const matches = (org: Org, query: Record<string, { $eq?: string; $ne?: string }>) =>
+    Object.entries(query).every(([field, condition]) =>
+      '$ne' in condition ? (org as any)[field] !== condition.$ne : (org as any)[field] === condition.$eq,
+    );
+  // An entity as the token sees it
+  const shown = (org: Org) =>
+    Object.fromEntries(Object.entries(org).filter(([key]) => !hidden.get(org.id)?.includes(key)));
 
   beforeEach(() => {
     originalFetch = window.fetch;
     Logger.disableLogging = true;
     searches = 0;
     holdSearches = undefined;
+    hidden = new Map();
     server = Array.from({ length: 25 }, (_, i) => ({
       id: `id${String(i + 1).padStart(2, '0')}`,
       name: `A${String(i + 1).padStart(2, '0')}`,
@@ -357,7 +365,11 @@ describe('ButtressDataService query', () => {
         let found = server.filter((o) => matches(o, body.query));
         if (body.sort?.name) found = found.sort((a, b) => (a.name < b.name ? -body.sort.name : body.sort.name));
         found = found.slice(body.skip, body.limit ? body.skip + body.limit : undefined);
-        return new Response(JSON.stringify(found));
+        return new Response(JSON.stringify(found.map(shown)));
+      }
+      if (init?.method === 'GET') {
+        const org = server.find(({ id }) => id === url.pathname.split('/').pop());
+        return new Response(JSON.stringify(org && shown(org)));
       }
       return new Response('{}');
     };
@@ -662,6 +674,126 @@ describe('ButtressDataService query', () => {
     const { results } = await ds.query(active, { sort: byName });
 
     expect(names(results)).to.deep.equal(['A00', ...range(1, 25).filter((n) => n !== 'A03')]);
+  });
+
+  // Without limit or skip, results are the entities Buttress matched, and those written since it was asked, as crag
+  // matches them now.
+  describe('unpaged results', () => {
+    const notActive = { status: { $ne: 'active' } };
+
+    // An active organisation whose status the token can't see, which crag reads as missing.
+    const withHiddenStatus = async () => {
+      server.push({ id: 'idh', name: 'Hidden', status: 'active' });
+      hidden.set('idh', ['status']);
+      const ds = dataService();
+      await ds.query({});
+      return ds;
+    };
+
+    it('leaves out an entity Buttress did not match, though it matches locally', async () => {
+      const ds = await withHiddenStatus();
+
+      const { results } = await ds.query(notActive);
+
+      expect(ds.get('organisation.idh')).to.deep.equal({ id: 'idh', name: 'Hidden' });
+      expect(names(results)).to.deep.equal(['Inactive']);
+    });
+
+    it('leaves it out when the answer is cached', async () => {
+      const ds = await withHiddenStatus();
+      await ds.query(notActive);
+
+      const { results } = await ds.query(notActive);
+
+      expect(searches).to.equal(2);
+      expect(names(results)).to.deep.equal(['Inactive']);
+    });
+
+    it('leaves out an entity fetched by id after Buttress answered', async () => {
+      server.push({ id: 'idh', name: 'Hidden', status: 'active' });
+      hidden.set('idh', ['status']);
+      const ds = dataService();
+      await ds.query(notActive);
+
+      await ds.getById('idh');
+      const { results } = await ds.query(notActive);
+
+      expect(names(results)).to.deep.equal(['Inactive']);
+    });
+
+    it('matches locally an entity fetched because Buttress changed it', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+      // Changed by another client, whose realtime update made crag fetch it
+      server[25].status = 'active';
+
+      await ds.getById('idx', { changed: true });
+      const { results } = await ds.query(active, { sort: byName });
+
+      expect(searches).to.equal(1);
+      expect(names(results)).to.deep.equal([...range(1, 25), 'Inactive']);
+    });
+
+    it('matches locally an entity changed since so it now matches', async () => {
+      const ds = dataService();
+      await ds.query({});
+      await ds.query(active, { sort: byName });
+
+      ds.set('organisation.idx.status', 'active');
+      const { results } = await ds.query(active, { sort: byName });
+
+      expect(searches).to.equal(2);
+      expect(names(results)).to.deep.equal([...range(1, 25), 'Inactive']);
+    });
+
+    it('matches locally an entity created by another client', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+
+      // How ButtressRealtime adds an entity another client created.
+      ds.create({ id: 'id00', name: 'A00', status: 'active' }, { localOnly: true });
+      const { results } = await ds.query(active, { sort: byName });
+
+      expect(names(results)).to.deep.equal(['A00', ...range(1, 25)]);
+    });
+
+    it('matches locally an entity written while the search was out', async () => {
+      const ds = dataService();
+      await ds.query({});
+      let release!: () => void;
+      holdSearches = new Promise((resolve) => {
+        release = resolve;
+      });
+
+      const loading = ds.query(active, { sort: byName });
+      await flush();
+      ds.set('organisation.idx.status', 'active');
+      release();
+      const { results } = await loading;
+
+      expect(names(results)).to.deep.equal([...range(1, 25), 'Inactive']);
+    });
+
+    it('matches locally the entities of a collection set in place of the old one', async () => {
+      const ds = dataService();
+      await ds.query(active, { sort: byName });
+
+      ds.set('organisation', new Map([['local', { id: 'local', name: 'A00', status: 'active' }]]));
+      const { results } = await ds.query(active, { sort: byName });
+
+      expect(names(results)).to.deep.equal(['A00']);
+    });
+
+    // So a property a policy hides reads as missing again, as the README says.
+    it('matches locally an entity with a hidden property once it has been written', async () => {
+      const ds = await withHiddenStatus();
+      await ds.query(notActive);
+
+      ds.set('organisation.idh.name', 'Hidden 2');
+      const { results } = await ds.query(notActive);
+
+      expect(names(results)).to.deep.equal(['Inactive', 'Hidden 2']);
+    });
   });
 
   it('sends the sort direction to Buttress', async () => {
@@ -1501,7 +1633,9 @@ describe('ButtressDataService local sort', () => {
   const sorted = (entities: ButtressEntity[], sort: object) => {
     const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
     entities.forEach((entity) => ds.get('organisation').set(entity.id, entity));
-    return (ds as any).__filterLocalData({}, sort).map((entity: ButtressEntity) => entity.id);
+    // As Buttress answered, matching every one
+    const answer = { ids: entities.map((entity) => entity.id), paged: false, generation: 0, writes: 0 };
+    return (ds as any).__filterLocalData({}, answer, sort).map((entity: ButtressEntity) => entity.id);
   };
 
   it('sorts strings without regard to case, with missing values first', () => {

@@ -1402,6 +1402,20 @@ describe('ButtressDbService API', () => {
     expect(el.get('organisation.y')).to.deep.equal({ id: 'y', name: 'y' });
   });
 
+  // Realtime fetches it because Buttress changed it, so it may now match a query Buttress answered before.
+  it('matches an entity realtime fetches in a cached unpaged query', async () => {
+    const el = await connected();
+    respond = (path) => (path.endsWith('/count') ? 0 : []);
+    await el.query('organisation', { name: { $eq: 'y' } });
+    respond = (path) => (path.endsWith('/count') ? 1 : { id: path.split('/').pop(), name: 'y' });
+
+    await (el as any)._realtime._loadById({ schemaName: 'organisation', id: 'y' });
+    const { results } = await el.query('organisation', { name: { $eq: 'y' } });
+
+    expect(results).to.deep.equal([{ id: 'y', name: 'y' }]);
+    expect(sent.filter(({ method, path }) => method === 'QUERY' && !path.endsWith('/count'))).to.have.length(1);
+  });
+
   it('queries and counts through the data service', async () => {
     const el = await connected();
     respond = (path) => (path.endsWith('/count') ? 1 : [{ id: 'x', name: 'a' }]);

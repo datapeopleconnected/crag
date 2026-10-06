@@ -310,9 +310,11 @@ const activeOrLarge = await db.query(
 `query()` sends the query to Buttress and merges what comes back into the store, and asks Buttress for the total. How
 it then chooses `results` depends on whether you ask for a page, with `limit` or `skip`.
 
-**Without `limit` or `skip`,** crag runs the query against everything in the store, in the `sort` order. So
-`results` includes matching entities that are only in the store, such as ones you've just created, and leaves out ones
-you've changed so they no longer match.
+**Without `limit` or `skip`,** `results` is the entities Buttress matched, together with those written since the search
+was sent: created, or changed so they may now match, by you or by another client. crag runs the query against these
+locally, in the `sort` order, so `results` includes matching entities that are only in the store, such as ones you've
+just created, and leaves out ones that have changed so they no longer match. An entity Buttress didn't match, and that
+hasn't changed since, stays out, even if it's in the store.
 
 **With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
 When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
@@ -356,9 +358,10 @@ Every operator can also be written with `@` in place of `$` (`@eq`, `@or`, `@elM
 
 crag can only match the properties it has. A property a policy hides from the token reads as missing, though Buttress
 queries its value. So for a query on a property some entities have hidden, a condition that matches a missing field,
-such as `null`, `$ne`, `$nin` or `$exists: false`, also matches those entities locally, where Buttress wouldn't. Pass
-`limit` to get the page Buttress matched instead. Buttress refuses a query on a property none of the token's policies
-shows, with 403, so `query()` rejects.
+such as `null`, `$ne`, `$nin` or `$exists: false`, matches those entities locally where Buttress doesn't. `results`
+follows Buttress's answer for them, unless one has been written since the search was sent, when crag has only its own
+match to go on and includes it. Pass `bust: true` to ask Buttress again. Buttress refuses a query on a property none of
+the token's policies shows, with 403, so `query()` rejects.
 
 | Operator                                     | Matches when…                                                               |
 | -------------------------------------------- | --------------------------------------------------------------------------- |

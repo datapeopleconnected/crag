@@ -404,10 +404,9 @@ describe('ButtressDbService', () => {
     });
 
     // User 2's store has every seeded organisation, with the numbers of those numbered 50 or more. Buttress answers a
-    // query on number through policy-test-2 alone, which shows only number, so its answer is compared by id. results
-    // are the seeded organisations Buttress matches, except that crag reads a number it can't see as missing, as the
-    // README says: a query that matches a missing number also matches those organisations locally, though Buttress,
-    // which has their numbers, doesn't.
+    // query on number through policy-test-2 alone, which shows only number, so its answer is compared by id. crag reads
+    // a number it can't see as missing, so a query that matches a missing number matches those organisations locally,
+    // but results are restricted to what Buttress matched, which has their numbers.
     describe('local matching on number as user 2, who sees only some numbers', () => {
       let db: ButtressDbService;
       // The seeded organisations' names by id
@@ -441,13 +440,14 @@ describe('ButtressDbService', () => {
         { number: { $nin: [50, 60] } },
         { number: { $exists: false } },
       ]) {
-        it(`matches ${JSON.stringify(query)} as Buttress does, and the organisations whose number it hides`, async () => {
+        it(`matches ${JSON.stringify(query)} as Buttress does, leaving out the organisations whose number it hides`, async () => {
           const { results } = await db.query('organisation', query);
 
           const buttress = seededNames(await buttressAnswer(query, USER2_TOKEN));
+          // Buttress matches none of those, though each matches locally without its number.
           expect(buttress.some((name) => hidden.includes(name))).to.equal(false);
-          expect(seededNames(results)).to.deep.equal([...buttress, ...hidden].sort());
-          // A page is what Buttress matched
+          expect(seededNames(results)).to.deep.equal(buttress);
+          // A page is what Buttress matched too
           const { results: page } = await db.query('organisation', query, { limit: 100 });
           expect(seededNames(page)).to.deep.equal(buttress);
         });
