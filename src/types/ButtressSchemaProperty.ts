@@ -22,5 +22,7 @@ export type ButtressSchemaProperty = {
   __required?: boolean;
   __allowUpdate?: boolean;
   __enum?: string[];
+  // An array's item type, when its items aren't objects
+  __itemtype?: string;
   __schema?: ButtressSchemaProperties;
 };

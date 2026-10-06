@@ -290,8 +290,8 @@ try {
 
 ## Queries
 
-A query maps paths to operators. Paths use dots and reach into nested objects and arrays. Combine conditions with
-`$and` and `$or`:
+A query maps paths to operators, or to a value to equal. Paths use dots and reach into nested objects and arrays.
+Combine conditions with `$and`, `$or` and `$nor`:
 
 ```ts
 const active = await db.query('organisation', { status: { $eq: 'active' } }, { sort: { path: 'name', direction: 'ASC' } });
@@ -306,12 +306,9 @@ const activeOrLarge = await db.query(
 `query()` sends the query to Buttress and merges what comes back into the store, and asks Buttress for the total. How
 it then chooses `results` depends on whether you ask for a page, with `limit` or `skip`.
 
-**Without `limit` or `skip`,** crag runs the query against everything in the store. So:
-
-- `results` includes matching entities that are only in the store, such as ones you've just created, and leaves out
-  ones you've changed so they no longer match;
-- `$or` returns its matches grouped by the condition they met, so it doesn't keep the `sort` order. If you need both,
-  sort the results yourself.
+**Without `limit` or `skip`,** crag runs the query against everything in the store, in the `sort` order. So
+`results` includes matching entities that are only in the store, such as ones you've just created, and leaves out ones
+you've changed so they no longer match.
 
 **With `limit` or `skip`,** `results` is the page Buttress returned, in Buttress's order, whatever else is in the store.
 When the page is served from the cache, crag leaves out entities that have since been deleted or changed so they no
@@ -335,23 +332,40 @@ Either way:
 | `bust`        | Fetches even if this exact query has already run.                                 |
 | `actualCount` | Passed to Buttress with the count request.                                        |
 
-Buttress evaluates the query when fetching; crag evaluates it again locally to choose `results`. Locally, a path that
-passes through arrays can give several values, and an entity matches if any of them passes:
+Buttress evaluates the query when fetching; crag evaluates it again locally to choose `results`, by the rules Buttress
+matches by, which are MongoDB's:
 
-| Operator                                     | Matches when a value at the path…                                           |
+- A path that passes through arrays reaches a value in each item, and a path that ends at an array reaches the array
+  and each of its items. An entity matches if any of those values passes, though `$ne`, `$not` and `$nin` need every
+  one to.
+- A field an entity hasn't got reads as `null`: `{ status: null }` matches it, and so does `$ne` or `$nin` of anything
+  else.
+- Values compare only with values of their own type: numbers with numbers, text with text, dates with dates. Each
+  operand is read first as its property's type in the schema, as Buttress reads it, so `{ count: { $gt: '3' } }` compares
+  with the number 3 when `count` is a `number`, and `'true'` is `true` for a `boolean`. On a `date` property, the ISO
+  strings dates arrive as and the operand are both read as dates.
+- A value given in place of operators, `{ status: 'active' }`, is compared as `$eq` compares it. An object or a list given
+  as a value is compared whole: `{ address: { city: 'Leeds' } }` matches an address with that field and no other, and
+  `{ tags: ['a', 'b'] }` matches that list, in that order.
+
+Every operator can also be written with `@` in place of `$` (`@eq`, `@or`, `@elMatch`), as Buttress takes them.
+
+| Operator                                     | Matches when…                                                               |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
-| `$eq`                                        | equals the operand                                                          |
-| `$not`                                       | differs from the operand                                                    |
-| `$gt`, `$gte`, `$lt`, `$lte`                 | is greater than, at least, less than, or at most the operand                |
-| `$in`                                        | is in the operand array                                                     |
-| `$nin`                                       | is not in the operand array. Every value must pass this one.               |
-| `$rex`, `$rexi`                              | matches the regular expression. `$rexi` ignores case.                      |
-| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | is after, on or after, before, or on or before the operand date. Dates are compared as times, whether they're `Date`s or the ISO strings they arrive from Buttress as. A missing or `null` date never matches, and nor does anything for a `null` operand. |
-| `$exists`                                    | is present, even if `null`, when the operand is `true`; is missing when it's `false`. |
-| `$elMatch`                                   | is an array with an element that matches the sub-query                     |
-| `$inProp`                                    | contains the operand. Top-level properties only.                           |
+| `$eq`                                        | a value equals the operand                                                  |
+| `$ne`, `$not`                                | no value equals the operand                                                 |
+| `$gt`, `$gte`, `$lt`, `$lte`                 | a value is greater than, at least, less than, or at most the operand. For a `null` operand, `$gte` and `$lte` match a `null` or missing field, and `$gt` and `$lt` match nothing. |
+| `$gtDate`, `$gteDate`, `$ltDate`, `$lteDate` | as `$gt`, `$gte`, `$lt` and `$lte`. They compare dates on a `date` property, as those do; on any other, they compare values as they are. |
+| `$in`                                        | a value equals one in the operand list                                      |
+| `$nin`                                       | no value equals one in the operand list                                     |
+| `$all`                                       | each item of the operand list equals a value. An empty list matches nothing. |
+| `$exists`                                    | the field is present, even if `null`, when the operand is `true`; is missing when it's `false` |
+| `$rex`, `$rexi`, `$regex`                    | a text value matches the regular expression. `$rexi` ignores case.          |
+| `$inProp`                                    | a text value contains the operand                                           |
+| `$elMatch`, `$elemMatch`                     | an item of a list matches the query on its own: `{ items: { $elMatch: { sku: 'a', qty: { $gt: 1 } } } }`. Given only operators, it tests the items themselves: `{ scores: { $elMatch: { $gt: 1, $lt: 5 } } }`. |
+| `$and`, `$or`, `$nor`                        | every, any, or none of the queries in the list match. An empty list is passed over. |
 
-An unknown operator logs an error and matches nothing.
+An unknown operator logs an error and matches nothing, though Buttress refuses a query that names one.
 
 ## Events
 

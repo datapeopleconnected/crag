@@ -21,7 +21,8 @@ import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, buildSettings, Dasherize, DateTime } from './helpers.js';
+import { Settings, buildSettings, Dasherize } from './helpers.js';
+import { compileQuery } from './query.js';
 
 export interface QueryResult {
   skip?: number;
@@ -516,10 +517,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // page is the entities the server sent, less any since deleted or changed so they don't match.
   private __page(buttressQuery: any, ids: string[]): ButtressEntity[] {
     const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
-    // _processQueryPart can reorder the entities ($or does), so keep the server's order.
-    const matching = new Set(this.__matchLocally(buttressQuery, entities));
-
-    return entities.filter((entity) => matching.has(entity));
+    return this.__matchLocally(buttressQuery, entities);
   }
 
   private __filterLocalData(buttressQuery: any, sort?: SortOpts): ButtressEntity[] {
@@ -581,106 +579,13 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return bVal.localeCompare(aVal);
   }
 
+  // The entities that match a query, in the order given, as Buttress would match them.
   _processQueryPart(query: any, data: Array<any>) {
-    let output = data.slice(0);
+    const unknown: string[] = [];
+    const matches = compileQuery(query, this._schema?.properties, unknown);
+    unknown.forEach((operator) => this._logger.error(new Error(`Invalid operator: ${operator}`)));
 
-    for (const field of Object.keys(query)) {
-      if (field === '$and') {
-        query[field].forEach((o: any) => {
-          output = this._processQueryPart(o, output);
-        });
-      } else if (field === '$or') {
-        output = query[field]
-          .map((o: any) => this._processQueryPart(o, output))
-          .reduce(
-            (combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)),
-            [],
-          );
-      } else {
-        const command = query[field];
-        for (const operator of Object.keys(command)) {
-          output = this._queryFilterData(output, field, operator, command[operator]);
-        }
-      }
-    }
-
-    return output;
-  }
-
-  private __parsePath(obj: any, path: string) {
-    let value = this._store.get(path, obj);
-    value = value ? value : this.__recursivePathLookUp(obj, path);
-    return Array.isArray(value) ? value : [value];
-  }
-
-  private __recursivePathLookUp = (root: any, path: string) => {
-    const parts = path.toString().split('.');
-
-    const helper = (current: any, remainingParts: string[]): any[] | string | undefined => {
-      if (!current || remainingParts.length === 0) return current;
-
-      const [currentPart, ...restParts] = remainingParts;
-
-      if (current instanceof Map) {
-        return helper(current.get(currentPart), restParts);
-      } else if (typeof current === 'object' && Array.isArray(current)) {
-        const results = current
-          .map((item) => helper(item, [currentPart, ...restParts]))
-          .flat()
-          .filter((v) => v);
-        return results.length > 0 ? results : undefined;
-      } else if (typeof current === 'object') {
-        return helper(current[currentPart], restParts);
-      }
-
-      return undefined;
-    };
-
-    return helper(root, parts);
-  };
-
-  _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    // A date operator compares times. DateTime gives NaN for a value that isn't a date, such as a missing or null one,
-    // and NaN compares false, so those never match, and an operand that isn't a date matches nothing.
-    const dateOperator = (matches: (time: number, operandTime: number) => boolean) => (rhs: any) => {
-      const operandTime = DateTime(rhs);
-      return (lhs: any) => this.__parsePath(lhs, field).some((val) => matches(DateTime(val), operandTime));
-    };
-
-    // Each operator takes its operand and returns the filter for it.
-    const fns: { [key: string]: (rhs: any) => (lhs: any) => boolean } = {
-      $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
-      $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
-      $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,
-      $lt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val < rhs) !== -1,
-      $gte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val >= rhs) !== -1,
-      $lte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val <= rhs) !== -1,
-      $rex: (rhs: any) => (lhs: any) =>
-        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs).test(val)) !== -1,
-      $rexi: (rhs: any) => (lhs: any) =>
-        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs, 'i').test(val)) !== -1,
-      $in: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).some((v) => rhs.indexOf(v) !== -1),
-      $nin: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).every((v) => rhs.indexOf(v) === -1),
-      // As in MongoDB: present, even if null. __parsePath gives no values for an empty array, so check for one.
-      $exists: (rhs: any) => (lhs: any) => {
-        const exists =
-          this.__parsePath(lhs, field).some((val) => val !== undefined) || Array.isArray(this._store.get(field, lhs));
-        return rhs ? exists : !exists;
-      },
-      $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
-      $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
-      $gtDate: dateOperator((time, operandTime) => time > operandTime),
-      $ltDate: dateOperator((time, operandTime) => time < operandTime),
-      $gteDate: dateOperator((time, operandTime) => time >= operandTime),
-      $lteDate: dateOperator((time, operandTime) => time <= operandTime),
-    };
-
-    if (!fns[operator]) {
-      this._logger.error(new Error(`Invalid operator: ${operator}`));
-      return [];
-    }
-
-    return data.filter(fns[operator](operand));
+    return data.filter((entity) => matches(entity));
   }
 
   async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {

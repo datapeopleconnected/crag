@@ -732,10 +732,11 @@ describe('ButtressDataService query', () => {
     const logged: unknown[] = [];
     console.error = (...args: unknown[]) => logged.push(args);
 
-    const err = await ds.query({ status: null }).catch((e: unknown) => e);
+    // Buttress refuses a pattern that isn't one, but this one answers anything.
+    const err = await ds.query({ name: { $rex: '(' } }).catch((e: unknown) => e);
     console.error = originalError;
 
-    expect(err).to.be.instanceOf(TypeError);
+    expect(err).to.be.instanceOf(SyntaxError);
     expect(logged).to.have.length(1);
   });
 });
@@ -1618,7 +1619,12 @@ describe('ButtressDataService date operators on data from Buttress', () => {
 });
 
 describe('ButtressDataService query operators', () => {
-  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const datedSchema: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: { name: { __type: 'string' }, founded: { __type: 'date' } },
+  };
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), datedSchema);
   const data = [
     { id: 'a', name: 'Alpha', tags: ['x', 'y'], founded: new Date('2000-01-01'), links: [new Map([['kind', 'web']])] },
     { id: 'b', name: 'Beta', tags: ['y'], founded: new Date('2010-01-01'), links: [] },
@@ -1630,10 +1636,10 @@ describe('ButtressDataService query operators', () => {
     expect(ids({ $and: [{ tags: { $eq: 'y' } }, { name: { $eq: 'Beta' } }] })).to.deep.equal(['b']);
   });
 
-  it('matches any part of an $or, once each', () => {
+  it('matches any part of an $or, once each, in the order given', () => {
     expect(
       ids({ $or: [{ name: { $eq: 'Gamma' } }, { tags: { $eq: 'y' } }, { name: { $eq: 'Alpha' } }] }),
-    ).to.deep.equal(['c', 'a', 'b']);
+    ).to.deep.equal(['a', 'b', 'c']);
   });
 
   it('matches $inProp against an array property', () => {
@@ -1646,9 +1652,13 @@ describe('ButtressDataService query operators', () => {
     expect(ids({ founded: { $gteDate: '2000-01-01', $lteDate: '2010-01-01' } })).to.deep.equal(['a', 'b']);
   });
 
-  it('matches nothing for a date operator with a null operand', () => {
-    for (const operator of ['$gtDate', '$ltDate', '$gteDate', '$lteDate']) {
+  // As MongoDB compares null: only $gte and $lte match it, and then only a null or missing date.
+  it('matches only a null date for $gteDate or $lteDate with a null operand', () => {
+    for (const operator of ['$gtDate', '$ltDate']) {
       expect(ids({ founded: { [operator]: null } }), operator).to.deep.equal([]);
+    }
+    for (const operator of ['$gteDate', '$lteDate']) {
+      expect(ids({ founded: { [operator]: null } }), operator).to.deep.equal(['c']);
     }
   });
 
@@ -1676,7 +1686,26 @@ describe('ButtressDataService query operators', () => {
 // A path into an array matches if any value it reaches does. Each path to an identifier here passes through two
 // arrays: the signatories, and the identifiers of each signatory's person.
 describe('ButtressDataService query operators on nested arrays', () => {
-  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), schema);
+  const nestedSchema: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: {
+      threshold: { __type: 'number' },
+      signatories: {
+        __type: 'array',
+        __schema: {
+          person: {
+            // @ts-expect-error ButtressSchemaProperty can't type a plain nested object, though the store handles one.
+            identifiers: {
+              __type: 'array',
+              __schema: { name: { __type: 'string' }, age: { __type: 'number' }, hired_at: { __type: 'date' } },
+            },
+          },
+        },
+      },
+    },
+  };
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), nestedSchema);
   const identifier = (name: string, age: number, hired: string) => ({ name, age, hired_at: new Date(hired) });
   const data = [
     {
@@ -1716,11 +1745,11 @@ describe('ButtressDataService query operators on nested arrays', () => {
     expect(ids({ [name]: { $eq: 'James' } })).to.deep.equal(['second']);
   });
 
-  // So an entity with John and Mary matches $not John. $nin, below, needs every value to differ.
-  it('matches $not when any value differs', () => {
+  // As MongoDB's $ne, so an entity with John and Mary doesn't match $not John.
+  it('matches $not when no value equals the operand', () => {
     expect(ids({ threshold: { $not: 1 } })).to.deep.equal(['second']);
     expect(ids({ [name]: { $not: 'Anna' } })).to.deep.equal(['first', 'second']);
-    expect(ids({ [name]: { $not: 'John' } })).to.deep.equal(['first', 'second', 'third']);
+    expect(ids({ [name]: { $not: 'John' } })).to.deep.equal(['second', 'third']);
   });
 
   it('matches $gt and $lt against any value in the arrays', () => {
@@ -1763,5 +1792,165 @@ describe('ButtressDataService query operators on nested arrays', () => {
   it('matches $gtDate and $ltDate against any date in the arrays', () => {
     expect(ids({ [hiredAt]: { $gtDate: '2022-01-01T00:00:00.000Z' } })).to.deep.equal(['second']);
     expect(ids({ [hiredAt]: { $ltDate: '2012-01-01T00:00:00.000Z' } })).to.deep.equal(['first', 'second']);
+  });
+});
+
+// The rules Buttress matches a query by, which are MongoDB's, so the results crag chooses locally are the ones Buttress
+// would give. The schema types the operands: Buttress reads them as their properties' types before comparing.
+describe('ButtressDataService queries as MongoDB reads them', () => {
+  const typed: ButtressSchema = {
+    name: 'organisation',
+    type: 'collection',
+    properties: {
+      status: { __type: 'string' },
+      count: { __type: 'number' },
+      active: { __type: 'boolean' },
+      founded: { __type: 'date' },
+      tags: { __type: 'array', __itemtype: 'string' },
+      scores: { __type: 'array', __itemtype: 'number' },
+      // @ts-expect-error ButtressSchemaProperty can't type a plain nested object, though the store handles one.
+      address: { city: { __type: 'string' }, postcode: { __type: 'string' } },
+      items: { __type: 'array', __schema: { sku: { __type: 'string' }, qty: { __type: 'number' } } },
+    },
+  };
+  const ds = new ButtressDataService('organisation', false, {}, new ButtressStore(), typed);
+  // Dates as they arrive from Buttress, as ISO strings. `c` hasn't got status, active, founded or address.
+  const data = [
+    {
+      id: 'a',
+      status: 'active',
+      count: 5,
+      active: true,
+      founded: '2020-01-01T00:00:00.000Z',
+      tags: ['x', 'y'],
+      scores: [1, 7],
+      address: { city: 'Leeds', postcode: 'LS1' },
+      items: [
+        { sku: 'p', qty: 0 },
+        { sku: '', qty: 2 },
+      ],
+      label: '10',
+    },
+    {
+      id: 'b',
+      status: 'closed',
+      count: 0,
+      active: false,
+      founded: '2010-06-01T00:00:00.000Z',
+      tags: ['y'],
+      scores: [2],
+      address: { city: 'York' },
+      items: [{ sku: 'p', qty: 3 }],
+      label: 'b',
+    },
+    { id: 'c', count: null, tags: [], scores: [], items: [] },
+  ];
+  const ids = (query: object) => ds._processQueryPart(query, data).map((o: ButtressEntity) => o.id);
+
+  describe('operators', () => {
+    it('matches $ne when no value equals the operand, a missing one included', () => {
+      expect(ids({ status: { $ne: 'active' } })).to.deep.equal(['b', 'c']);
+      expect(ids({ tags: { $ne: 'x' } })).to.deep.equal(['b', 'c']);
+      expect(ids({ status: { $nin: ['active'] } })).to.deep.equal(['b', 'c']);
+    });
+
+    // So a list holding x and y doesn't match $not x, though y differs from it.
+    it('matches $not as $ne', () => {
+      expect(ids({ tags: { $not: 'x' } })).to.deep.equal(['b', 'c']);
+      expect(ids({ status: { $not: 'active' } })).to.deep.equal(['b', 'c']);
+    });
+
+    it('matches $all when every operand is a value, and nothing for an empty list', () => {
+      expect(ids({ tags: { $all: ['y', 'x'] } })).to.deep.equal(['a']);
+      expect(ids({ tags: { $all: ['y'] } })).to.deep.equal(['a', 'b']);
+      expect(ids({ tags: { $all: [] } })).to.deep.equal([]);
+    });
+
+    it('matches $regex as $rex does', () => {
+      expect(ids({ status: { $regex: '^act' } })).to.deep.equal(['a']);
+    });
+
+    it('matches $elemMatch as $elMatch does', () => {
+      expect(ids({ items: { $elemMatch: { sku: 'p', qty: { $gt: 1 } } } })).to.deep.equal(['b']);
+    });
+
+    it('matches $nor when no part matches', () => {
+      expect(ids({ $nor: [{ status: { $eq: 'active' } }, { count: { $eq: 0 } }] })).to.deep.equal(['c']);
+    });
+
+    it('takes the @ names of operators', () => {
+      expect(ids({ '@or': [{ status: { '@eq': 'closed' } }, { count: { '@gt': 4 } }] })).to.deep.equal(['a', 'b']);
+      expect(ids({ '@and': [{ tags: { '@in': ['y'] } }, { count: { '@lte': 0 } }] })).to.deep.equal(['b']);
+      expect(ids({ '@nor': [{ tags: { '@all': ['y'] } }] })).to.deep.equal(['c']);
+      expect(ids({ scores: { '@elMatch': { '@gt': 5 } } })).to.deep.equal(['a']);
+    });
+
+    it('keeps the order it was given for an $or', () => {
+      expect(ids({ $or: [{ status: { $eq: 'closed' } }, { status: { $eq: 'active' } }] })).to.deep.equal(['a', 'b']);
+    });
+
+    it('passes over a logical operator with an empty list, as Buttress does', () => {
+      expect(ids({ $or: [] })).to.deep.equal(['a', 'b', 'c']);
+    });
+  });
+
+  describe('values', () => {
+    it('compares a bare value as $eq', () => {
+      expect(ids({ status: 'active' })).to.deep.equal(['a']);
+    });
+
+    it('compares an object given as a value whole', () => {
+      expect(ids({ address: { city: 'Leeds', postcode: 'LS1' } })).to.deep.equal(['a']);
+      expect(ids({ address: { city: 'Leeds' } })).to.deep.equal([]);
+    });
+
+    it('compares a list given as a value whole, in order', () => {
+      expect(ids({ tags: ['x', 'y'] })).to.deep.equal(['a']);
+      expect(ids({ tags: ['y'] })).to.deep.equal(['b']);
+      expect(ids({ tags: ['y', 'x'] })).to.deep.equal([]);
+      expect(ids({ tags: { $eq: [] } })).to.deep.equal(['c']);
+    });
+
+    it("reads an $elMatch of operators as tests of a list's values", () => {
+      expect(ids({ scores: { $elMatch: { $gt: 5 } } })).to.deep.equal(['a']);
+      expect(ids({ scores: { $elMatch: { $gt: 1, $lt: 3 } } })).to.deep.equal(['b']);
+    });
+
+    it('reads a missing field as null', () => {
+      expect(ids({ status: { $eq: null } })).to.deep.equal(['c']);
+      expect(ids({ status: null })).to.deep.equal(['c']);
+      expect(ids({ count: null })).to.deep.equal(['c']);
+      expect(ids({ status: { $ne: null } })).to.deep.equal(['a', 'b']);
+    });
+
+    it('finds 0 and an empty string through arrays', () => {
+      expect(ids({ 'items.qty': { $eq: 0 } })).to.deep.equal(['a']);
+      expect(ids({ 'items.qty': { $lt: 1 } })).to.deep.equal(['a']);
+      expect(ids({ 'items.sku': { $eq: '' } })).to.deep.equal(['a']);
+      expect(ids({ 'items.qty': 0 })).to.deep.equal(['a']);
+    });
+  });
+
+  describe('types', () => {
+    it('compares values of one type only', () => {
+      expect(ids({ label: { $gt: 5 } })).to.deep.equal([]);
+      expect(ids({ label: { $gt: '1' } })).to.deep.equal(['a', 'b']);
+      expect(ids({ count: { $gte: null } })).to.deep.equal(['c']);
+      expect(ids({ count: { $lt: null } })).to.deep.equal([]);
+    });
+
+    it("reads an operand as its property's type", () => {
+      expect(ids({ count: { $eq: '5' } })).to.deep.equal(['a']);
+      expect(ids({ count: { $in: ['0', '5'] } })).to.deep.equal(['a', 'b']);
+      expect(ids({ active: 'false' })).to.deep.equal(['b']);
+      expect(ids({ scores: { $elMatch: { $gt: '5' } } })).to.deep.equal(['a']);
+      expect(ids({ 'items.qty': { $gt: '2' } })).to.deep.equal(['b']);
+    });
+
+    it('compares dates as dates, for a property the schema types as one', () => {
+      expect(ids({ founded: { $eq: '2020-01-01' } })).to.deep.equal(['a']);
+      expect(ids({ founded: '2010-06-01' })).to.deep.equal(['b']);
+      expect(ids({ founded: { $gt: '2015-01-01' } })).to.deep.equal(['a']);
+    });
   });
 });
