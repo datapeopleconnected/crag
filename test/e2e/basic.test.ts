@@ -287,6 +287,38 @@ describe('ButtressDbService', () => {
       await writer.delete(path, { wait: true });
       await eventually(() => watcher.get(path) === undefined, 'the delete to reach the watcher');
     });
+
+    // An update to an entity the watcher hasn't got makes it fetch the entity by id. Buttress changed it, so a query
+    // answered before then, without it, matches it locally.
+    it('adds an entity fetched for an update to a cached unpaged query it now matches', async function () {
+      this.timeout(15000);
+      const writer = await connectAs(APP_TOKEN);
+      const path = (await writer.create('organisation', newOrg(writer, 'Fetched Org'), { wait: true }))!;
+      // Connected after the create, so it never has the entity until the update
+      const watcher = await connectAs(APP_TOKEN);
+      const renamed = { name: { $eq: 'Fetched Org 2' } };
+      const before = await watcher.query('organisation', renamed);
+      expect(before.results).to.deep.equal([]);
+      expect(watcher.get(path)).to.equal(undefined);
+
+      // Counts the searches from here on, which cached answers make none of
+      const originalFetch = window.fetch;
+      let searches = 0;
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'QUERY' && new URL(input.toString()).pathname.endsWith('/organisation/')) searches += 1;
+        return originalFetch(input, init);
+      };
+      try {
+        await writer.set(`${path}.name`, 'Fetched Org 2', { wait: true });
+        await eventually(() => watcher.get(path) !== undefined, 'the update to make the watcher fetch the entity');
+        const { results } = await watcher.query('organisation', renamed);
+
+        expect(searches).to.equal(0);
+        expect(results.map((org) => org.name)).to.deep.equal(['Fetched Org 2']);
+      } finally {
+        window.fetch = originalFetch;
+      }
+    });
   });
 
   // crag matches a query again locally to choose results. These check it matches the entities Buttress does, for the
