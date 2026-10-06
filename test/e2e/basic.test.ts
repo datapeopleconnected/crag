@@ -275,6 +275,99 @@ describe('ButtressDbService', () => {
     });
   });
 
+  // crag matches a query again locally to choose results. These check it matches the entities Buttress does, for the
+  // rules both take from MongoDB, with every entity in the store, so crag could match ones Buttress doesn't.
+  describe('local matching', () => {
+    const MATCH = { name: { $rex: '^Match Org ' } };
+    const orgs = [
+      {
+        name: 'Match Org 1',
+        number: 0,
+        status: 'active',
+        tags: ['x', 'y'],
+        contacts: [
+          { name: 'A', qty: 0 },
+          { name: '', qty: 2 },
+        ],
+      },
+      { name: 'Match Org 2', number: 10, status: 'closed', tags: ['y'], contacts: [{ name: 'A', qty: 3 }] },
+      { name: 'Match Org 3', number: 25, status: 'active', tags: [], contacts: [] },
+    ];
+    const ALL = orgs.map((org) => org.name);
+
+    let db: ButtressDbService;
+    const names = (results: Entity[]) => results.map((org) => String(org.name)).sort();
+
+    // Buttress's own answer, asked for directly: query() matches even the page Buttress sends again
+    const buttressMatches = async (query: Entity) => {
+      const response = await fetch(`${ENDPOINT}/test/api/v1/organisation/`, {
+        method: 'QUERY',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${APP_TOKEN}` },
+        body: JSON.stringify({ query }),
+      });
+      expect(response.status, await response.clone().text()).to.equal(200);
+      return names(await response.json());
+    };
+
+    before(async () => {
+      const writer = await connectAs(APP_TOKEN);
+      for (const org of orgs) {
+        await writer.create('organisation', { ...newOrg(writer, org.name), ...org }, { wait: true });
+      }
+      // A client with every one of them in its store
+      db = await connectAs(APP_TOKEN);
+      await db.query('organisation', MATCH);
+    });
+
+    const cases: [string, Entity, string[]][] = [
+      ['a bare value', { status: 'active' }, ['Match Org 1', 'Match Org 3']],
+      ['$ne on a list', { tags: { $ne: 'x' } }, ['Match Org 2', 'Match Org 3']],
+      ['$not on a list', { tags: { $not: 'x' } }, ['Match Org 2', 'Match Org 3']],
+      ['$all', { tags: { $all: ['y', 'x'] } }, ['Match Org 1']],
+      ['$all of an empty list', { tags: { $all: [] } }, []],
+      ['$regex', { status: { $regex: '^act' } }, ['Match Org 1', 'Match Org 3']],
+      ['$elemMatch', { contacts: { $elemMatch: { name: 'A', qty: { $gt: 1 } } } }, ['Match Org 2']],
+      [
+        'an $elMatch with its own $or',
+        { contacts: { $elMatch: { $or: [{ qty: 3 }, { name: '' }] } } },
+        ['Match Org 1', 'Match Org 2'],
+      ],
+      ["an $elMatch of a list's values", { tags: { $elMatch: { $gt: 'x' } } }, ['Match Org 1', 'Match Org 2']],
+      ['$nor', { $nor: [{ status: 'closed' }, { number: 0 }] }, ['Match Org 3']],
+      [
+        '@ names',
+        { '@or': [{ status: { '@eq': 'closed' } }, { number: { '@gt': 20 } }] },
+        ['Match Org 2', 'Match Org 3'],
+      ],
+      ['a list compared whole', { tags: ['x', 'y'] }, ['Match Org 1']],
+      ['a list compared whole, in order', { tags: ['y', 'x'] }, []],
+      ['an empty list compared whole', { tags: [] }, ['Match Org 3']],
+      ['0 through an array', { 'contacts.qty': 0 }, ['Match Org 1']],
+      ['an empty string through an array', { 'contacts.name': '' }, ['Match Org 1']],
+      ['a missing field as null', { nothing: null }, ALL],
+      ['$ne of a missing field', { nothing: { $ne: 'x' } }, ALL],
+      [
+        "a field an array's documents haven't got as null",
+        { 'contacts.nothing': null },
+        ['Match Org 1', 'Match Org 2'],
+      ],
+      ["an operand read as its property's type", { number: { $in: ['0', '25'] } }, ['Match Org 1', 'Match Org 3']],
+      ['a comparison across types', { name: { $gt: 5 } }, []],
+      ['$gte of null', { number: { $gte: null } }, []],
+    ];
+
+    for (const [rule, query, expected] of cases) {
+      it(`matches ${rule} as Buttress does`, async () => {
+        const matching = { $and: [MATCH, query] };
+
+        const { results } = await db.query('organisation', matching);
+
+        expect(await buttressMatches(matching)).to.deep.equal(expected);
+        expect(names(results)).to.deep.equal(expected);
+      });
+    }
+  });
+
   // scripts/e2e-seed.js gives user 1 policy-test-1, which lets through name and status. User 2 also gets
   // policy-test-2, which lets through number for organisations whose number is 50 or more. Buttress sends those
   // organisations twice, once for each policy, and the store merges them.
