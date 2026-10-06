@@ -25,9 +25,12 @@ The package includes a [Custom Elements Manifest](https://custom-elements-manife
 
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
-crag needs a Buttress built from its `develop` branch at `3f044191` or later, published as
-`dpcltd/buttress:sha-3f04419`. It relies on Buttress answering a bulk update for each update in it, and on
-`auth.token` for the realtime socket. No tagged Buttress release has these yet.
+crag needs a Buttress built from its `develop` branch at `390fea49` or later. The first published image with it is
+`dpcltd/buttress:sha-0d46e96`. crag sends its queries and counts with the HTTP `QUERY` method
+([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)), which replaces `SEARCH`; an older Buttress answers `QUERY`
+with 404. crag also relies on Buttress answering a bulk update for each update in it, in the error format Buttress
+uses from that build on, and on `auth.token` for the realtime socket. No tagged Buttress release has these yet. A
+proxy or firewall in front of Buttress has to let `QUERY` requests through, as it did `SEARCH`.
 
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
 Node 24 or newer; see [Development](#development).
@@ -414,8 +417,8 @@ npm run test:unit
 | `npm run test:watch`          | Runs the unit tests again whenever a file changes.                             |
 | `npm run test:scripts`        | Tests the scripts in `scripts/` in Node, with a fake `docker`. No Docker needed. |
 | `npm test`                    | Builds, bundles and runs the end-to-end tests. Needs Docker.                   |
-| `npm run lint`                | Runs ESLint, then Stylelint on the CSS in `src/`. `lint:fix` fixes what it can. |
-| `npm run format`              | Checks formatting with Prettier. `format:fix` applies it.                      |
+| `npm run lint`                | Runs oxlint. `lint:fix` fixes what it can.                                     |
+| `npm run format`              | Checks formatting with oxfmt. `format:fix` applies it.                         |
 | `npm run typecheck`           | Type-checks `src/` and `test/`.                                                |
 | `npm run check`               | Runs `lint`, `format`, `typecheck`, `test:coverage` and `test:scripts`.        |
 | `npm run publint`             | Checks the packed package with publint and Are the Types Wrong.                |
@@ -449,7 +452,7 @@ when you exit it.
 
 ### Commits and publishing
 
-The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with ESLint and Prettier, then
+The pre-commit hook runs lint-staged, which fixes the staged `.ts` files with oxlint and oxfmt, then
 `npm run build` and `npm run licence-check`. Every file in `src/`, `test/` and `scripts/`,
 apart from HTML and JSON, must start with the header in `.husky/licencing_header.txt`.
 

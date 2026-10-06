@@ -36,7 +36,7 @@ interface PendingRequest extends QueuedRequest {
 // Buttress's answer for one update in a bulk update. One it didn't apply has null results, and its validation says why.
 interface BulkUpdateEntry {
   results?: unknown;
-  validation?: true | { code?: number; message?: string };
+  validation?: true | { status?: number; code?: string; message?: string };
 }
 
 // Sends a schema's requests to Buttress one at a time. With bundling on, adds and deletes go ahead of other
@@ -179,7 +179,7 @@ export class ButtressRequestQueue {
       // As from a Buttress older than crag supports. It may have applied some or all of them.
       const err = new Error(
         `Buttress didn't answer each update in the bulk update to ${url}, so crag can't tell which it applied. ` +
-          `crag needs Buttress develop at 3f044191 or later.`,
+          `crag needs Buttress develop at 390fea49 or later.`,
       );
       this._logger.error(err);
       batch.forEach((r) => r.reject(err));
@@ -194,7 +194,7 @@ export class ButtressRequestQueue {
       }
 
       const err = new ButtressError(
-        refusal?.code ?? 500,
+        refusal?.status ?? 500,
         'POST',
         url,
         refusal?.message ?? "Buttress didn't apply the update",

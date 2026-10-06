@@ -49,7 +49,7 @@ const update = (id: string, path = 'name'): QueuedRequest => ({
   body: path,
 });
 const remove = (id: string): QueuedRequest => ({ type: 'delete', method: 'DELETE', url: `delete ${id}`, entityId: id });
-const search = (): QueuedRequest => ({ type: 'search', method: 'SEARCH', url: 'search' });
+const search = (): QueuedRequest => ({ type: 'search', method: 'QUERY', url: 'search' });
 
 describe('ButtressRequestQueue', () => {
   beforeEach(() => {
@@ -72,16 +72,16 @@ describe('ButtressRequestQueue', () => {
 
   it('sends adds and deletes ahead of other requests', async () => {
     expect(await run(search(), update('a'), remove('b'), search())).to.deep.equal([
-      'SEARCH search',
+      'QUERY search',
       'DELETE delete b',
       'PUT update a',
-      'SEARCH search',
+      'QUERY search',
     ]);
   });
 
   it('does not send a delete ahead of an earlier update to the same entity', async () => {
     expect(await run(search(), update('x'), add('y'), remove('x'))).to.deep.equal([
-      'SEARCH search',
+      'QUERY search',
       'POST add y',
       'PUT update x',
       'DELETE delete x',
@@ -89,12 +89,12 @@ describe('ButtressRequestQueue', () => {
   });
 
   it('does not send a delete ahead of an earlier get of the same entity', async () => {
-    expect(await run(search(), get('x'), remove('x'))).to.deep.equal(['SEARCH search', 'GET get x', 'DELETE delete x']);
+    expect(await run(search(), get('x'), remove('x'))).to.deep.equal(['QUERY search', 'GET get x', 'DELETE delete x']);
   });
 
   it('does not bundle an update ahead of an earlier delete of the same entity', async () => {
     expect(await run(search(), update('x', 'a'), remove('x'), update('x', 'b'))).to.deep.equal([
-      'SEARCH search',
+      'QUERY search',
       'PUT update x',
       'DELETE delete x',
       'PUT update x',
@@ -103,7 +103,7 @@ describe('ButtressRequestQueue', () => {
 
   it('bundles unrelated requests of the same type, in the order they were queued', async () => {
     expect(await run(search(), update('a', 'one'), add('b'), update('c', 'two'), add('d'))).to.deep.equal([
-      'SEARCH search',
+      'QUERY search',
       'POST bulk ["b","d"]',
       'POST bulk [{"id":"a","body":"one"},{"id":"c","body":"two"}]',
     ]);
@@ -111,7 +111,7 @@ describe('ButtressRequestQueue', () => {
 
   it('bundles updates to the same entity together', async () => {
     expect(await run(search(), update('x', 'a'), update('x', 'b'))).to.deep.equal([
-      'SEARCH search',
+      'QUERY search',
       'POST bulk [{"id":"x","body":"a"},{"id":"x","body":"b"}]',
     ]);
   });
@@ -125,7 +125,7 @@ describe('ButtressRequestQueue', () => {
     release();
     await Promise.all(done);
 
-    expect(sent).to.deep.equal(['SEARCH search', 'PUT update a', 'POST add b', 'POST add c']);
+    expect(sent).to.deep.equal(['QUERY search', 'PUT update a', 'POST add b', 'POST add c']);
   });
 
   it('lets go of nextIdle waiters once idle', async () => {
@@ -205,9 +205,15 @@ describe('ButtressRequestQueue', () => {
     it('settles each bundled update from its own entry', async () => {
       const entries: Record<string, object> = {
         applied: { results: [{ type: 'scalar' }] },
-        refused: { results: null, validation: { code: 400, message: 'organisation: Invalid ID: b' } },
+        refused: {
+          results: null,
+          validation: { status: 400, code: 'invalid_id', message: 'organisation: Invalid ID: b' },
+        },
         valid: { results: [{ type: 'scalar' }], validation: true },
-        refusedWithResults: { results: [], validation: { code: 400, message: 'organisation: refused' } },
+        refusedWithResults: {
+          results: [],
+          validation: { status: 400, code: 'invalid_update', message: 'organisation: refused' },
+        },
         unexplained: { results: null },
       };
       const { queue, release } = respondingClient((_method, url, body) =>
@@ -254,7 +260,7 @@ describe('ButtressRequestQueue', () => {
 
         expect(searched).to.equal('resolved');
         expect(updates).to.have.length(2);
-        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 3f044191/));
+        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 390fea49/));
       });
     }
 
@@ -294,7 +300,7 @@ describe('ButtressRequestQueue', () => {
         'resolved',
       ]);
       expect(sent).to.deep.equal([
-        'SEARCH search',
+        'QUERY search',
         'POST bulk ["a","bad","c"]',
         'POST add a',
         'POST add bad',
@@ -324,6 +330,6 @@ describe('ButtressRequestQueue', () => {
   it('bundles adds that do not name their entity', async () => {
     const anonymous = (body: string): QueuedRequest => ({ type: 'add', method: 'POST', url: 'add', body });
 
-    expect(await run(search(), anonymous('a'), anonymous('b'))).to.deep.equal(['SEARCH search', 'POST bulk ["a","b"]']);
+    expect(await run(search(), anonymous('a'), anonymous('b'))).to.deep.equal(['QUERY search', 'POST bulk ["a","b"]']);
   });
 });
