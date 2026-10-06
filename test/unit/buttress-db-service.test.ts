@@ -871,7 +871,11 @@ describe('ButtressDbService bundled writes', () => {
         return json(
           body.map((u: { id: string; body: { value: unknown } }) =>
             u.body.value === 'invalid'
-              ? { id: u.id, results: null, validation: { code: 400, message: 'organisation: Invalid value: status' } }
+              ? {
+                  id: u.id,
+                  results: null,
+                  validation: { status: 400, code: 'invalid_update', message: 'organisation: Invalid value: status' },
+                }
               : { id: u.id, results: [u.body] },
           ),
         );

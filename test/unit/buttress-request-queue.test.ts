@@ -205,9 +205,15 @@ describe('ButtressRequestQueue', () => {
     it('settles each bundled update from its own entry', async () => {
       const entries: Record<string, object> = {
         applied: { results: [{ type: 'scalar' }] },
-        refused: { results: null, validation: { code: 400, message: 'organisation: Invalid ID: b' } },
+        refused: {
+          results: null,
+          validation: { status: 400, code: 'invalid_id', message: 'organisation: Invalid ID: b' },
+        },
         valid: { results: [{ type: 'scalar' }], validation: true },
-        refusedWithResults: { results: [], validation: { code: 400, message: 'organisation: refused' } },
+        refusedWithResults: {
+          results: [],
+          validation: { status: 400, code: 'invalid_update', message: 'organisation: refused' },
+        },
         unexplained: { results: null },
       };
       const { queue, release } = respondingClient((_method, url, body) =>
@@ -254,7 +260,7 @@ describe('ButtressRequestQueue', () => {
 
         expect(searched).to.equal('resolved');
         expect(updates).to.have.length(2);
-        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 3f044191/));
+        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 390fea49/));
       });
     }
 
