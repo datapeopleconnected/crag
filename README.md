@@ -32,6 +32,10 @@ with 404. crag also relies on Buttress answering a bulk update for each update i
 uses from that build on, and on `auth.token` for the realtime socket. No tagged Buttress release has these yet. A
 proxy or firewall in front of Buttress has to let `QUERY` requests through, as it did `SEARCH`.
 
+crag matches [queries](#queries) locally as Buttress matches them from `develop` at `7b63e45f`, which matches them as
+MongoDB does. The first published image with it is `dpcltd/buttress:sha-6b2f4e7`. With an older Buttress, `query()`
+can choose `results` that differ from what Buttress would match.
+
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
 Node 24 or newer; see [Development](#development).
 
