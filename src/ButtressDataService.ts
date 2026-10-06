@@ -21,7 +21,8 @@ import ButtressSchema from './ButtressSchema.js';
 import { ButtressSchemaFactory } from './ButtressSchemaFactory.js';
 import { ButtressStore, NotifyChangeOpts, ButtressStoreInterface, ButtressEntity } from './ButtressStore.js';
 
-import { Settings, buildSettings, Dasherize, DateTime } from './helpers.js';
+import { Settings, buildSettings, Dasherize } from './helpers.js';
+import { compileQuery } from './query.js';
 
 export interface QueryResult {
   skip?: number;
@@ -52,6 +53,10 @@ export interface QueryOpts {
 // deleted meanwhile.
 type Written = Map<string, Set<string> | true>;
 
+// Buttress's answer to a query: the ids it returned, in its order, and when it was asked. A page from before the
+// latest create, or an entity written since, may be missing from it.
+type Answer = { ids: string[]; paged: boolean; generation: number; writes: number };
+
 // A value as it's sent to Buttress.
 type Json = null | boolean | number | string | Json[] | JsonObject;
 type JsonObject = { [key: string]: Json };
@@ -73,14 +78,20 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   private _queue: ButtressRequestQueue;
 
-  // The ids each search returned, in the server's order, keyed by __queryKey().
-  private _queryCache: Map<string, { ids: string[]; paged: boolean; generation: number }> = new Map();
+  // Buttress's answer to each search, keyed by __queryKey().
+  private _queryCache: Map<string, Answer> = new Map();
 
   // Bumped by a create: cached pages from an earlier generation are searched for again.
   private __pageGeneration = 0;
 
   // Bumped when the query cache is cleared: a search sent before then isn't cached when it comes back.
   private __cacheEpoch = 0;
+
+  // Counts the writes to entities, by this client or another.
+  private __writes = 0;
+
+  // The write count at each entity's latest write. A search sent before then may not match it as it is now.
+  private __writtenAt: Map<string, number> = new Map();
 
   // One for each search or GET that's queued or waiting for its response. The response is older than the writes
   // recorded in it, since Buttress hadn't had them when it answered, so merging it mustn't undo them.
@@ -233,6 +244,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
 
   // Records a write to an entity, or to one of its top-level keys, for each search or GET that's out.
   private __recordWrite(id: string, key?: string) {
+    this.__markWritten(id);
     this.__reads.forEach((written) => {
       const keys = written.get(id);
       if (keys === true) return;
@@ -244,6 +256,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
         written.set(id, new Set([key]));
       }
     });
+  }
+
+  private __markWritten(id: string) {
+    this.__writes += 1;
+    this.__writtenAt.set(id, this.__writes);
   }
 
   private __startRead(): Written {
@@ -261,9 +278,11 @@ export default class ButtressDataService implements ButtressStoreInterface {
     const parts = path.split('.');
     const [, id, ...entityPath] = parts;
     if (id === undefined) {
-      // A set of the whole collection is only ever local. Its entities aren't the ones the synced copies were of.
+      // A set of the whole collection is only ever local. Its entities aren't the ones the synced copies were of, or
+      // the ones Buttress matched.
       this.__synced.clear();
       const setPath = this._store.set(path, value, ButtressDataService.__storeOpts(opts));
+      if (value instanceof Map) value.forEach((_, entityId) => this.__markWritten(entityId));
       this.__send(opts, () => []);
       return setPath;
     }
@@ -468,7 +487,15 @@ export default class ButtressDataService implements ButtressStoreInterface {
     this._schema = schema;
   }
 
-  async getById(id: string) {
+  // `changed` says Buttress has changed the entity since it was searched for, as a realtime update to it does, so
+  // unpaged queries match it locally rather than by Buttress's answer.
+  async getById(id: string, opts?: { changed?: boolean }) {
+    const entity = await this.__getById(id);
+    if (entity && opts?.changed) this.__markWritten(entity.id);
+    return entity;
+  }
+
+  private async __getById(id: string) {
     const storeEntity = this.get(`${this.name}.${id}`);
     if (storeEntity) return storeEntity;
 
@@ -494,20 +521,18 @@ export default class ButtressDataService implements ButtressStoreInterface {
   }
 
   async query(buttressQuery: any, opts?: QueryOpts): Promise<QueryResult> {
-    // Fetches the matching entities into the local store, unless this search is cached.
-    const found = await this.search(buttressQuery, opts);
-    // The ids of the page: those this search found, or else the cached ones, which search() only answers from when it
-    // has them. Taken now, since a resync can clear the cache while the count is out, and a search that was out when
-    // the cache was cleared isn't cached.
-    const pageIds = found
-      ? ButtressDataService.__ids(found)
-      : this._queryCache.get(this.__queryKey(buttressQuery, opts))!.ids;
+    // Fetches the matching entities into the local store, unless this search is cached. The answer is taken now, since
+    // a resync can clear the cache while the count is out, and a search that was out when the cache was cleared isn't
+    // cached.
+    const answer = await this.__search(buttressQuery, opts);
 
     // Fetch the total results count from buttress as the query maybe paged.
     const total = await this.count(buttressQuery, opts?.actualCount);
 
     const paged = ButtressDataService.__isPaged(opts);
-    const results = paged ? this.__page(buttressQuery, pageIds) : this.__filterLocalData(buttressQuery, opts?.sort);
+    const results = paged
+      ? this.__page(buttressQuery, answer.ids)
+      : this.__filterLocalData(buttressQuery, answer, opts?.sort);
 
     return { skip: opts?.skip, limit: opts?.limit, total, results };
   }
@@ -516,14 +541,17 @@ export default class ButtressDataService implements ButtressStoreInterface {
   // page is the entities the server sent, less any since deleted or changed so they don't match.
   private __page(buttressQuery: any, ids: string[]): ButtressEntity[] {
     const entities = ids.map((id) => this._store.get(`${this.name}.${id}`)).filter((entity) => entity);
-    // _processQueryPart can reorder the entities ($or does), so keep the server's order.
-    const matching = new Set(this.__matchLocally(buttressQuery, entities));
-
-    return entities.filter((entity) => matching.has(entity));
+    return this.__matchLocally(buttressQuery, entities);
   }
 
-  private __filterLocalData(buttressQuery: any, sort?: SortOpts): ButtressEntity[] {
-    let arr = Array.from(this._store.get(this.name).values());
+  // The entities Buttress matched, and those written since it was asked, which it can't have matched as they are now:
+  // created, or changed so they may match. Each is matched again locally, which drops those changed so they no longer
+  // match. Buttress's answer decides the rest, since crag can't match a property a policy hides from it.
+  private __filterLocalData(buttressQuery: any, answer: Answer, sort?: SortOpts): ButtressEntity[] {
+    const matched = new Set(answer.ids);
+    let arr = Array.from(this._store.get(this.name).values()).filter(
+      (entity: any) => matched.has(entity.id) || (this.__writtenAt.get(entity.id) ?? 0) > answer.writes,
+    );
 
     if (sort) {
       arr = arr.sort((a: any, b: any) => this.__sort(a, b, sort));
@@ -581,116 +609,24 @@ export default class ButtressDataService implements ButtressStoreInterface {
     return bVal.localeCompare(aVal);
   }
 
+  // The entities that match a query, in the order given, as Buttress would match them.
   _processQueryPart(query: any, data: Array<any>) {
-    let output = data.slice(0);
+    const unknown: string[] = [];
+    const matches = compileQuery(query, this._schema?.properties, unknown);
+    unknown.forEach((operator) => this._logger.error(new Error(`Invalid operator: ${operator}`)));
 
-    for (const field of Object.keys(query)) {
-      if (field === '$and') {
-        query[field].forEach((o: any) => {
-          output = this._processQueryPart(o, output);
-        });
-      } else if (field === '$or') {
-        output = query[field]
-          .map((o: any) => this._processQueryPart(o, output))
-          .reduce(
-            (combined: any, results: any) => combined.concat(results.filter((r: any) => combined.indexOf(r) === -1)),
-            [],
-          );
-      } else {
-        const command = query[field];
-        for (const operator of Object.keys(command)) {
-          output = this._queryFilterData(output, field, operator, command[operator]);
-        }
-      }
-    }
-
-    return output;
+    return data.filter((entity) => matches(entity));
   }
 
-  private __parsePath(obj: any, path: string) {
-    let value = this._store.get(path, obj);
-    value = value ? value : this.__recursivePathLookUp(obj, path);
-    return Array.isArray(value) ? value : [value];
-  }
-
-  private __recursivePathLookUp = (root: any, path: string) => {
-    const parts = path.toString().split('.');
-
-    const helper = (current: any, remainingParts: string[]): any[] | string | undefined => {
-      if (!current || remainingParts.length === 0) return current;
-
-      const [currentPart, ...restParts] = remainingParts;
-
-      if (current instanceof Map) {
-        return helper(current.get(currentPart), restParts);
-      } else if (typeof current === 'object' && Array.isArray(current)) {
-        const results = current
-          .map((item) => helper(item, [currentPart, ...restParts]))
-          .flat()
-          .filter((v) => v);
-        return results.length > 0 ? results : undefined;
-      } else if (typeof current === 'object') {
-        return helper(current[currentPart], restParts);
-      }
-
-      return undefined;
-    };
-
-    return helper(root, parts);
-  };
-
-  _queryFilterData(data: any, field: string, operator: string, operand: any) {
-    // A date operator compares times. DateTime gives NaN for a value that isn't a date, such as a missing or null one,
-    // and NaN compares false, so those never match, and an operand that isn't a date matches nothing.
-    const dateOperator = (matches: (time: number, operandTime: number) => boolean) => (rhs: any) => {
-      const operandTime = DateTime(rhs);
-      return (lhs: any) => this.__parsePath(lhs, field).some((val) => matches(DateTime(val), operandTime));
-    };
-
-    // Each operator takes its operand and returns the filter for it.
-    const fns: { [key: string]: (rhs: any) => (lhs: any) => boolean } = {
-      $not: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val !== rhs) !== -1,
-      $eq: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val === rhs) !== -1,
-      $gt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val > rhs) !== -1,
-      $lt: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val < rhs) !== -1,
-      $gte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val >= rhs) !== -1,
-      $lte: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).findIndex((val) => val <= rhs) !== -1,
-      $rex: (rhs: any) => (lhs: any) =>
-        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs).test(val)) !== -1,
-      $rexi: (rhs: any) => (lhs: any) =>
-        this.__parsePath(lhs, field).findIndex((val) => new RegExp(rhs, 'i').test(val)) !== -1,
-      $in: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).some((v) => rhs.indexOf(v) !== -1),
-      $nin: (rhs: any) => (lhs: any) => this.__parsePath(lhs, field).every((v) => rhs.indexOf(v) === -1),
-      // As in MongoDB: present, even if null. __parsePath gives no values for an empty array, so check for one.
-      $exists: (rhs: any) => (lhs: any) => {
-        const exists =
-          this.__parsePath(lhs, field).some((val) => val !== undefined) || Array.isArray(this._store.get(field, lhs));
-        return rhs ? exists : !exists;
-      },
-      $inProp: (rhs: any) => (lhs: any) => lhs[field].indexOf(rhs) !== -1,
-      $elMatch: (rhs: any) => (lhs: any) => this._processQueryPart(rhs, this.__parsePath(lhs, field)).length > 0,
-      $gtDate: dateOperator((time, operandTime) => time > operandTime),
-      $ltDate: dateOperator((time, operandTime) => time < operandTime),
-      $gteDate: dateOperator((time, operandTime) => time >= operandTime),
-      $lteDate: dateOperator((time, operandTime) => time <= operandTime),
-    };
-
-    if (!fns[operator]) {
-      this._logger.error(new Error(`Invalid operator: ${operator}`));
-      return [];
-    }
-
-    return data.filter(fns[operator](operand));
-  }
-
-  async search(buttressQuery: any, opts?: QueryOpts): Promise<any> {
+  // Buttress's answer to a query: the cached one, or else a search's, whose entities it merges into the store.
+  private async __search(buttressQuery: any, opts?: QueryOpts): Promise<Answer> {
     const key = this.__queryKey(buttressQuery, opts);
     const paged = ButtressDataService.__isPaged(opts);
     const generation = this.__pageGeneration;
     const epoch = this.__cacheEpoch;
     const cached = this._queryCache.get(key);
     if (!opts?.bust && cached && (!cached.paged || cached.generation === generation)) {
-      return false;
+      return cached;
     }
 
     let sort: undefined | BJSSortOpt;
@@ -699,6 +635,8 @@ export default class ButtressDataService implements ButtressStoreInterface {
       sort[opts.sort.path] = opts.sort.direction === 'ASC' ? 1 : -1;
     }
 
+    // Writes from here on may have reached Buttress after it searched.
+    const writes = this.__writes;
     const written = this.__startRead();
     try {
       const body = await this.__generateSearchRequest(buttressQuery, opts?.limit, opts?.skip, sort, opts?.project);
@@ -725,11 +663,10 @@ export default class ButtressDataService implements ButtressStoreInterface {
       });
       // The generation from when the search was sent, so a create while it was out makes this page stale. A search
       // that was out when the cache was cleared, as it is by a resync, may be missing the changes the resync is for.
-      if (epoch === this.__cacheEpoch) {
-        this._queryCache.set(key, { ids: ButtressDataService.__ids(body), paged, generation });
-      }
+      const answer = { ids: ButtressDataService.__ids(body), paged, generation, writes };
+      if (epoch === this.__cacheEpoch) this._queryCache.set(key, answer);
 
-      return body;
+      return answer;
     } finally {
       this.__reads.delete(written);
     }

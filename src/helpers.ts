@@ -62,10 +62,3 @@ export function Camelize(str: string, upper?: boolean): string {
 export function Dasherize(str: string): string {
   return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 }
-
-// A date's time in milliseconds, whether it's a Date or, as dates from Buttress are, an ISO string. NaN for anything
-// that isn't a date, including null, which new Date() would read as 1970.
-export function DateTime(date: unknown): number {
-  if (date === null || date === undefined) return NaN;
-  return new Date(date as string | number | Date).getTime();
-}

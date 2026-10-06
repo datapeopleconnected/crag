@@ -37,6 +37,20 @@ const SEEDED = Array.from({ length: 10 }, (_, n) => ({
 }));
 const SEEDED_NAMES = SEEDED.map((org) => org.name);
 
+// The names of organisations, sorted.
+const names = (results: Entity[]) => results.map((org) => String(org.name)).sort();
+
+// Buttress's own answer to a query, asked for directly: query() matches even the page Buttress sends again.
+const buttressAnswer = async (query: Entity, token = APP_TOKEN): Promise<Entity[]> => {
+  const response = await fetch(`${ENDPOINT}/test/api/v1/organisation/`, {
+    method: 'QUERY',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+  });
+  expect(response.status, await response.clone().text()).to.equal(200);
+  return response.json();
+};
+
 // The properties Buttress let through, in name order, without the ids it adds.
 const visible = (results: Entity[]) =>
   results.map(({ id, sourceId, ...rest }) => rest).sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -273,6 +287,119 @@ describe('ButtressDbService', () => {
       await writer.delete(path, { wait: true });
       await eventually(() => watcher.get(path) === undefined, 'the delete to reach the watcher');
     });
+
+    // An update to an entity the watcher hasn't got makes it fetch the entity by id. Buttress changed it, so a query
+    // answered before then, without it, matches it locally.
+    it('adds an entity fetched for an update to a cached unpaged query it now matches', async function () {
+      this.timeout(15000);
+      const writer = await connectAs(APP_TOKEN);
+      const path = (await writer.create('organisation', newOrg(writer, 'Fetched Org'), { wait: true }))!;
+      // Connected after the create, so it never has the entity until the update
+      const watcher = await connectAs(APP_TOKEN);
+      const renamed = { name: { $eq: 'Fetched Org 2' } };
+      const before = await watcher.query('organisation', renamed);
+      expect(before.results).to.deep.equal([]);
+      expect(watcher.get(path)).to.equal(undefined);
+
+      // Counts the searches from here on, which cached answers make none of
+      const originalFetch = window.fetch;
+      let searches = 0;
+      window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'QUERY' && new URL(input.toString()).pathname.endsWith('/organisation/')) searches += 1;
+        return originalFetch(input, init);
+      };
+      try {
+        await writer.set(`${path}.name`, 'Fetched Org 2', { wait: true });
+        await eventually(() => watcher.get(path) !== undefined, 'the update to make the watcher fetch the entity');
+        const { results } = await watcher.query('organisation', renamed);
+
+        expect(searches).to.equal(0);
+        expect(results.map((org) => org.name)).to.deep.equal(['Fetched Org 2']);
+      } finally {
+        window.fetch = originalFetch;
+      }
+    });
+  });
+
+  // crag matches a query again locally to choose results. These check it matches the entities Buttress does, for the
+  // rules both take from MongoDB, with every entity in the store, so crag could match ones Buttress doesn't.
+  describe('local matching', () => {
+    const MATCH = { name: { $rex: '^Match Org ' } };
+    const orgs = [
+      {
+        name: 'Match Org 1',
+        number: 0,
+        status: 'active',
+        tags: ['x', 'y'],
+        contacts: [
+          { name: 'A', qty: 0 },
+          { name: '', qty: 2 },
+        ],
+      },
+      { name: 'Match Org 2', number: 10, status: 'closed', tags: ['y'], contacts: [{ name: 'A', qty: 3 }] },
+      { name: 'Match Org 3', number: 25, status: 'active', tags: [], contacts: [] },
+    ];
+    const ALL = orgs.map((org) => org.name);
+
+    let db: ButtressDbService;
+
+    before(async () => {
+      const writer = await connectAs(APP_TOKEN);
+      for (const org of orgs) {
+        await writer.create('organisation', { ...newOrg(writer, org.name), ...org }, { wait: true });
+      }
+      // A client with every one of them in its store
+      db = await connectAs(APP_TOKEN);
+      await db.query('organisation', MATCH);
+    });
+
+    const cases: [string, Entity, string[]][] = [
+      ['a bare value', { status: 'active' }, ['Match Org 1', 'Match Org 3']],
+      ['$ne on a list', { tags: { $ne: 'x' } }, ['Match Org 2', 'Match Org 3']],
+      ['$not on a list', { tags: { $not: 'x' } }, ['Match Org 2', 'Match Org 3']],
+      ['$all', { tags: { $all: ['y', 'x'] } }, ['Match Org 1']],
+      ['$all of an empty list', { tags: { $all: [] } }, []],
+      ['$regex', { status: { $regex: '^act' } }, ['Match Org 1', 'Match Org 3']],
+      ['$elemMatch', { contacts: { $elemMatch: { name: 'A', qty: { $gt: 1 } } } }, ['Match Org 2']],
+      [
+        'an $elMatch with its own $or',
+        { contacts: { $elMatch: { $or: [{ qty: 3 }, { name: '' }] } } },
+        ['Match Org 1', 'Match Org 2'],
+      ],
+      ["an $elMatch of a list's values", { tags: { $elMatch: { $gt: 'x' } } }, ['Match Org 1', 'Match Org 2']],
+      ['$nor', { $nor: [{ status: 'closed' }, { number: 0 }] }, ['Match Org 3']],
+      [
+        '@ names',
+        { '@or': [{ status: { '@eq': 'closed' } }, { number: { '@gt': 20 } }] },
+        ['Match Org 2', 'Match Org 3'],
+      ],
+      ['a list compared whole', { tags: ['x', 'y'] }, ['Match Org 1']],
+      ['a list compared whole, in order', { tags: ['y', 'x'] }, []],
+      ['an empty list compared whole', { tags: [] }, ['Match Org 3']],
+      ['0 through an array', { 'contacts.qty': 0 }, ['Match Org 1']],
+      ['an empty string through an array', { 'contacts.name': '' }, ['Match Org 1']],
+      ['a missing field as null', { nothing: null }, ALL],
+      ['$ne of a missing field', { nothing: { $ne: 'x' } }, ALL],
+      [
+        "a field an array's documents haven't got as null",
+        { 'contacts.nothing': null },
+        ['Match Org 1', 'Match Org 2'],
+      ],
+      ["an operand read as its property's type", { number: { $in: ['0', '25'] } }, ['Match Org 1', 'Match Org 3']],
+      ['a comparison across types', { name: { $gt: 5 } }, []],
+      ['$gte of null', { number: { $gte: null } }, []],
+    ];
+
+    for (const [rule, query, expected] of cases) {
+      it(`matches ${rule} as Buttress does`, async () => {
+        const matching = { $and: [MATCH, query] };
+
+        const { results } = await db.query('organisation', matching);
+
+        expect(names(await buttressAnswer(matching))).to.deep.equal(expected);
+        expect(names(results)).to.deep.equal(expected);
+      });
+    }
   });
 
   // scripts/e2e-seed.js gives user 1 policy-test-1, which lets through name and status. User 2 also gets
@@ -295,6 +422,68 @@ describe('ButtressDbService', () => {
       expect(await seededAs(USER2_TOKEN)).to.deep.equal(
         SEEDED.map(({ name, number, status }) => (number >= 50 ? { name, number, status } : { name, status })),
       );
+    });
+
+    // Buttress refuses a query on a property none of the user's policies shows them, so query() rejects before crag
+    // matches anything locally.
+    it('refuses user 1 a query on number, which no policy shows them', async () => {
+      const db = await connectAs(USER1_TOKEN);
+
+      const err = await db.query('organisation', { number: { $gte: 50 } }).catch((e: unknown) => e);
+
+      expect(err).to.be.instanceOf(ButtressError);
+      expect((err as ButtressError).status).to.equal(403);
+    });
+
+    // User 2's store has every seeded organisation, with the numbers of those numbered 50 or more. Buttress answers a
+    // query on number through policy-test-2 alone, which shows only number, so its answer is compared by id. crag reads
+    // a number it can't see as missing, so a query that matches a missing number matches those organisations locally,
+    // but results are restricted to what Buttress matched, which has their numbers.
+    describe('local matching on number as user 2, who sees only some numbers', () => {
+      let db: ButtressDbService;
+      // The seeded organisations' names by id
+      const seeded = new Map<string, string>();
+      const seededNames = (orgs: Entity[]) =>
+        orgs
+          .map((org) => seeded.get(String(org.id)))
+          .filter((name) => name !== undefined)
+          .sort();
+
+      before(async () => {
+        db = await connectAs(USER2_TOKEN);
+        const { results } = await db.query('organisation', {});
+        results.filter((org) => SEEDED_NAMES.includes(org.name)).forEach((org) => seeded.set(org.id, org.name));
+      });
+
+      // The seeded organisations whose numbers user 2 can't see
+      const hidden = SEEDED.filter((org) => org.number < 50).map((org) => org.name);
+
+      for (const query of [{ number: { $eq: 50 } }, { number: { $gte: 50 } }, { number: { $lt: 50 } }]) {
+        it(`matches ${JSON.stringify(query)} as Buttress does`, async () => {
+          const { results } = await db.query('organisation', query);
+
+          expect(seededNames(results)).to.deep.equal(seededNames(await buttressAnswer(query, USER2_TOKEN)));
+        });
+      }
+
+      for (const query of [
+        { number: null },
+        { number: { $ne: 50 } },
+        { number: { $nin: [50, 60] } },
+        { number: { $exists: false } },
+      ]) {
+        it(`matches ${JSON.stringify(query)} as Buttress does, leaving out the organisations whose number it hides`, async () => {
+          const { results } = await db.query('organisation', query);
+
+          const buttress = seededNames(await buttressAnswer(query, USER2_TOKEN));
+          // Buttress matches none of those, though each matches locally without its number.
+          expect(buttress.some((name) => hidden.includes(name))).to.equal(false);
+          expect(seededNames(results)).to.deep.equal(buttress);
+          // A page is what Buttress matched too
+          const { results: page } = await db.query('organisation', query, { limit: 100 });
+          expect(seededNames(page)).to.deep.equal(buttress);
+        });
+      }
     });
   });
 });
