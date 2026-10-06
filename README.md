@@ -354,6 +354,12 @@ matches by, which are MongoDB's:
 
 Every operator can also be written with `@` in place of `$` (`@eq`, `@or`, `@elMatch`), as Buttress takes them.
 
+crag can only match the properties it has. A property a policy hides from the token reads as missing, though Buttress
+queries its value. So for a query on a property some entities have hidden, a condition that matches a missing field,
+such as `null`, `$ne`, `$nin` or `$exists: false`, also matches those entities locally, where Buttress wouldn't. Pass
+`limit` to get the page Buttress matched instead. Buttress refuses a query on a property none of the token's policies
+shows, with 403, so `query()` rejects.
+
 | Operator                                     | Matches when…                                                               |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
 | `$eq`                                        | a value equals the operand                                                  |

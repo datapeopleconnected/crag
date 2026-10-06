@@ -37,6 +37,20 @@ const SEEDED = Array.from({ length: 10 }, (_, n) => ({
 }));
 const SEEDED_NAMES = SEEDED.map((org) => org.name);
 
+// The names of organisations, sorted.
+const names = (results: Entity[]) => results.map((org) => String(org.name)).sort();
+
+// Buttress's own answer to a query, asked for directly: query() matches even the page Buttress sends again.
+const buttressAnswer = async (query: Entity, token = APP_TOKEN): Promise<Entity[]> => {
+  const response = await fetch(`${ENDPOINT}/test/api/v1/organisation/`, {
+    method: 'QUERY',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+  });
+  expect(response.status, await response.clone().text()).to.equal(200);
+  return response.json();
+};
+
 // The properties Buttress let through, in name order, without the ids it adds.
 const visible = (results: Entity[]) =>
   results.map(({ id, sourceId, ...rest }) => rest).sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -296,18 +310,6 @@ describe('ButtressDbService', () => {
     const ALL = orgs.map((org) => org.name);
 
     let db: ButtressDbService;
-    const names = (results: Entity[]) => results.map((org) => String(org.name)).sort();
-
-    // Buttress's own answer, asked for directly: query() matches even the page Buttress sends again
-    const buttressMatches = async (query: Entity) => {
-      const response = await fetch(`${ENDPOINT}/test/api/v1/organisation/`, {
-        method: 'QUERY',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${APP_TOKEN}` },
-        body: JSON.stringify({ query }),
-      });
-      expect(response.status, await response.clone().text()).to.equal(200);
-      return names(await response.json());
-    };
 
     before(async () => {
       const writer = await connectAs(APP_TOKEN);
@@ -362,7 +364,7 @@ describe('ButtressDbService', () => {
 
         const { results } = await db.query('organisation', matching);
 
-        expect(await buttressMatches(matching)).to.deep.equal(expected);
+        expect(names(await buttressAnswer(matching))).to.deep.equal(expected);
         expect(names(results)).to.deep.equal(expected);
       });
     }
@@ -388,6 +390,68 @@ describe('ButtressDbService', () => {
       expect(await seededAs(USER2_TOKEN)).to.deep.equal(
         SEEDED.map(({ name, number, status }) => (number >= 50 ? { name, number, status } : { name, status })),
       );
+    });
+
+    // Buttress refuses a query on a property none of the user's policies shows them, so query() rejects before crag
+    // matches anything locally.
+    it('refuses user 1 a query on number, which no policy shows them', async () => {
+      const db = await connectAs(USER1_TOKEN);
+
+      const err = await db.query('organisation', { number: { $gte: 50 } }).catch((e: unknown) => e);
+
+      expect(err).to.be.instanceOf(ButtressError);
+      expect((err as ButtressError).status).to.equal(403);
+    });
+
+    // User 2's store has every seeded organisation, with the numbers of those numbered 50 or more. Buttress answers a
+    // query on number through policy-test-2 alone, which shows only number, so its answer is compared by id. results
+    // are the seeded organisations Buttress matches, except that crag reads a number it can't see as missing, as the
+    // README says: a query that matches a missing number also matches those organisations locally, though Buttress,
+    // which has their numbers, doesn't.
+    describe('local matching on number as user 2, who sees only some numbers', () => {
+      let db: ButtressDbService;
+      // The seeded organisations' names by id
+      const seeded = new Map<string, string>();
+      const seededNames = (orgs: Entity[]) =>
+        orgs
+          .map((org) => seeded.get(String(org.id)))
+          .filter((name) => name !== undefined)
+          .sort();
+
+      before(async () => {
+        db = await connectAs(USER2_TOKEN);
+        const { results } = await db.query('organisation', {});
+        results.filter((org) => SEEDED_NAMES.includes(org.name)).forEach((org) => seeded.set(org.id, org.name));
+      });
+
+      // The seeded organisations whose numbers user 2 can't see
+      const hidden = SEEDED.filter((org) => org.number < 50).map((org) => org.name);
+
+      for (const query of [{ number: { $eq: 50 } }, { number: { $gte: 50 } }, { number: { $lt: 50 } }]) {
+        it(`matches ${JSON.stringify(query)} as Buttress does`, async () => {
+          const { results } = await db.query('organisation', query);
+
+          expect(seededNames(results)).to.deep.equal(seededNames(await buttressAnswer(query, USER2_TOKEN)));
+        });
+      }
+
+      for (const query of [
+        { number: null },
+        { number: { $ne: 50 } },
+        { number: { $nin: [50, 60] } },
+        { number: { $exists: false } },
+      ]) {
+        it(`matches ${JSON.stringify(query)} as Buttress does, and the organisations whose number it hides`, async () => {
+          const { results } = await db.query('organisation', query);
+
+          const buttress = seededNames(await buttressAnswer(query, USER2_TOKEN));
+          expect(buttress.some((name) => hidden.includes(name))).to.equal(false);
+          expect(seededNames(results)).to.deep.equal([...buttress, ...hidden].sort());
+          // A page is what Buttress matched
+          const { results: page } = await db.query('organisation', query, { limit: 100 });
+          expect(seededNames(page)).to.deep.equal(buttress);
+        });
+      }
     });
   });
 });
