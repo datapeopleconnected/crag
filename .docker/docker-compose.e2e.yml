@@ -20,10 +20,9 @@ services:
       retries: 30
 
   buttress:
-    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 681f910d. crag needs
-    # 390fea49 or later, which takes QUERY: until dpcltd/buttress:sha-390fea4 is published and pinned here, run with
-    # BUTTRESS_IMAGE set to an image built from a Buttress checkout. Move it on deliberately.
-    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-681f910@sha256:a410bf9a44a328332a920422491f1b3e463c81cfe4b9daa7d02f06ae90d4f1cc}
+    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 0d46e961. crag needs
+    # 390fea49 or later. Move it on deliberately.
+    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-0d46e96@sha256:b8996213f5d45b0cbc6d6c63448fb069afd7beb44e99901f2323c326dad7b17b}
     # The image is only published for amd64. Without this, Arm machines such as Apple silicon Macs fail to pull it,
     # rather than running it emulated.
     platform: linux/amd64
