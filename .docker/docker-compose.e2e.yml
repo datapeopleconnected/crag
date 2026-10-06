@@ -20,9 +20,9 @@ services:
       retries: 30
 
   buttress:
-    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 27746cea, which matches
+    # Pinned, so a run doesn't change as Buttress's develop moves on: this is Buttress develop at 934c8fa4, which matches
     # queries as MongoDB does, as crag's local matching does. crag needs 390fea49 or later. Move it on deliberately.
-    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-27746ce@sha256:8d6bc10ba4bc9ad3b166c29158a617bd40c10d53b919ec28a384758176956484}
+    image: ${BUTTRESS_IMAGE:-dpcltd/buttress:sha-934c8fa@sha256:90cc574a4bd7ed6876d1a9c63951eaed27cdd0f3b52ea91633ea1ae94fdd0634}
     # The image is only published for amd64. Without this, Arm machines such as Apple silicon Macs fail to pull it,
     # rather than running it emulated.
     platform: linux/amd64
