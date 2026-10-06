@@ -333,7 +333,7 @@ describe('ButtressDbService resync', () => {
         }
         if (pathname.endsWith('/count')) return new Response('0');
         await hold;
-        if (init?.method === 'SEARCH') searches += 1;
+        if (init?.method === 'QUERY') searches += 1;
         return new Response(init?.method === 'GET' ? '{"id":"x"}' : '[]');
       };
     });
@@ -980,7 +980,7 @@ describe('ButtressDbService set of an entity from the store', () => {
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
       sent.push({ method: init!.method!, path: route, body });
       if (route.endsWith('/count')) return new Response('1');
-      if (init?.method === 'SEARCH') return new Response(JSON.stringify([stored]));
+      if (init?.method === 'QUERY') return new Response(JSON.stringify([stored]));
       if (route.endsWith('/bulk/update')) {
         return new Response(JSON.stringify((body as BulkUpdate).map((u) => ({ id: u.id, results: [u.body] }))));
       }

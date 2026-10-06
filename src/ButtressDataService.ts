@@ -776,7 +776,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   ): Promise<ButtressEntity[]> {
     return this._queue.push({
       type: 'search',
-      method: 'SEARCH',
+      method: 'QUERY',
       url: this.getUrl(),
       body: { query, limit, skip, sort, project },
     });
@@ -789,7 +789,7 @@ export default class ButtressDataService implements ButtressStoreInterface {
   private __generateCountRequest(query: any, actualCount: boolean = false): Promise<number> {
     return this._queue.push({
       type: 'count',
-      method: 'SEARCH',
+      method: 'QUERY',
       url: this.getUrl('count'),
       body: { query, actualCount },
     });

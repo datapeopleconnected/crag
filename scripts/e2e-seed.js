@@ -90,7 +90,7 @@ export const seed = async (endpoint, superToken) => {
     "config": [
       {
         "verbs": [
-          "GET", "SEARCH"
+          "GET", "QUERY"
         ],
         "schema": [
           "organisation"
@@ -117,7 +117,7 @@ export const seed = async (endpoint, superToken) => {
     "config": [
       {
         "verbs": [
-          "GET", "SEARCH"
+          "GET", "QUERY"
         ],
         "schema": [
           "organisation"

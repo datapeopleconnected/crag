@@ -342,7 +342,7 @@ describe('ButtressDataService query', () => {
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(input.toString());
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
-      if (init?.method === 'SEARCH' && url.pathname.endsWith('/organisation/count')) {
+      if (init?.method === 'QUERY' && url.pathname.endsWith('/organisation/count')) {
         return new Response(JSON.stringify(server.filter((o) => matches(o, body.query)).length));
       }
       if (init?.method === 'POST' && url.pathname.endsWith('/organisation/')) {
@@ -351,7 +351,7 @@ describe('ButtressDataService query', () => {
       }
       // Answered for each update, as Buttress does, without applying them.
       if (url.pathname.endsWith('/bulk/update')) return new Response(JSON.stringify(body.map(() => ({ results: [] }))));
-      if (init?.method === 'SEARCH') {
+      if (init?.method === 'QUERY') {
         searches += 1;
         await holdSearches;
         let found = server.filter((o) => matches(o, body.query));
@@ -676,7 +676,7 @@ describe('ButtressDataService query', () => {
     const ds = dataService();
     const fetchPage = window.fetch;
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === 'SEARCH' && !new URL(input.toString()).pathname.endsWith('/count')) {
+      if (init?.method === 'QUERY' && !new URL(input.toString()).pathname.endsWith('/count')) {
         return new Response(
           JSON.stringify([
             { id: 'id01', name: 'A01' },

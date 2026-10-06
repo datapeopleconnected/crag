@@ -58,6 +58,18 @@ describe('ButtressClient', () => {
     expect(init.cache).to.equal('no-store');
   });
 
+  it('sends the JSON content type without a body too', async () => {
+    // Buttress refuses a QUERY without it, with 415 unsupported_query_type.
+    const { client: c } = client();
+
+    await c.request('QUERY', 'https://example.test/api/v1/organisation/count');
+
+    const { init } = sent[0];
+    expect(init.method).to.equal('QUERY');
+    expect((init.headers as Record<string, string>)['Content-Type']).to.equal('application/json');
+    expect(init.body).to.equal(undefined);
+  });
+
   it('sends query values in the query string, with a cache-buster', async () => {
     const { client: c } = client();
 
@@ -89,11 +101,11 @@ describe('ButtressClient', () => {
     const { client: c } = client();
     respond = () => new Response('{"message":"access denied"}', { status: 403, statusText: 'Forbidden' });
 
-    const err = await c.request('SEARCH', 'https://example.test/api/v1/organisation/').catch((e) => e);
+    const err = await c.request('QUERY', 'https://example.test/api/v1/organisation/').catch((e) => e);
 
     expect(err).to.be.instanceOf(ButtressError);
     expect(err.status).to.equal(403);
-    expect(err.method).to.equal('SEARCH');
+    expect(err.method).to.equal('QUERY');
     expect(err.url).to.equal('https://example.test/api/v1/organisation/');
     expect(err.serverMessage).to.equal('access denied');
     expect(err.message).to.contain('access denied');
