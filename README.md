@@ -25,16 +25,14 @@ The package includes a [Custom Elements Manifest](https://custom-elements-manife
 
 crag depends on Lit 3 and `@lit/context`. If your app also uses Lit, use Lit 3 so the page loads a single copy of it.
 
-crag needs a Buttress built from its `develop` branch at `390fea49` or later. The first published image with it is
-`dpcltd/buttress:sha-0d46e96`. crag sends its queries and counts with the HTTP `QUERY` method
-([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)), which replaces `SEARCH`; an older Buttress answers `QUERY`
-with 404. crag also relies on Buttress answering a bulk update for each update in it, in the error format Buttress
-uses from that build on, and on `auth.token` for the realtime socket. No tagged Buttress release has these yet. A
-proxy or firewall in front of Buttress has to let `QUERY` requests through, as it did `SEARCH`.
+crag needs Buttress 3.0.0 or later (`dpcltd/buttress:3.0.0`). crag sends its queries and counts with the HTTP `QUERY`
+method ([RFC 10008](https://www.rfc-editor.org/rfc/rfc10008)), which replaces `SEARCH`; an older Buttress answers
+`QUERY` with 404. crag also relies on Buttress answering a bulk update for each update in it, in the error format
+Buttress 3.0.0 uses, and on `auth.token` for the realtime socket. A proxy or firewall in front of Buttress has to let
+`QUERY` requests through, as it did `SEARCH`.
 
-crag matches [queries](#queries) locally as Buttress matches them from `develop` at `7b63e45f`, which matches them as
-MongoDB does. The first published image with it is `dpcltd/buttress:sha-6b2f4e7`. With an older Buttress, `query()`
-can choose `results` that differ from what Buttress would match.
+crag matches [queries](#queries) locally as Buttress 3.0.0 matches them, which is as MongoDB does. With an older
+Buttress, `query()` can choose `results` that differ from what Buttress would match.
 
 crag runs in the browser, so installing it doesn't need a particular version of Node. Working on crag itself needs
 Node 24 or newer; see [Development](#development).
