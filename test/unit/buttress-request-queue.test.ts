@@ -260,7 +260,9 @@ describe('ButtressRequestQueue', () => {
 
         expect(searched).to.equal('resolved');
         expect(updates).to.have.length(2);
-        updates.forEach((message) => expect(message).to.match(/^Buttress didn't answer each update .* 390fea49/));
+        updates.forEach((message) =>
+          expect(message).to.match(/^Buttress didn't answer each update .* Buttress 3\.0\.0 or later/),
+        );
       });
     }
 

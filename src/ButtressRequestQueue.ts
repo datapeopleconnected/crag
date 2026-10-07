@@ -179,7 +179,7 @@ export class ButtressRequestQueue {
       // As from a Buttress older than crag supports. It may have applied some or all of them.
       const err = new Error(
         `Buttress didn't answer each update in the bulk update to ${url}, so crag can't tell which it applied. ` +
-          `crag needs Buttress develop at 390fea49 or later.`,
+          `crag needs Buttress 3.0.0 or later.`,
       );
       this._logger.error(err);
       batch.forEach((r) => r.reject(err));
